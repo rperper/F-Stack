@@ -31,8 +31,9 @@ ls_bind_func        ls_bind_arr[2]         = { (ls_bind_func)bind,
                                                (ls_bind_func)ff_bind  };
 ls_accept_func      ls_accept_arr[2]       = { (ls_accept_func)accept,   
                                                (ls_accept_func)local_accept };
-ls_connect_func     ls_connect_arr[2]      = { (ls_connect_func)connect, 
-                                               (ls_connect_func)ff_connect };
+// Connect has different POINTER parameters so is done in-line                                               
+//ls_connect_func     ls_connect_arr[2]      = { (ls_connect_func)connect, 
+//                                               (ls_connect_func)ff_connect };
 ls_close_func       ls_close_arr[2]        = { (ls_close_func)close,   
                                                (ls_close_func)ff_close };
 ls_shutdown_func    ls_shutdown_arr[2]     = { (ls_shutdown_func)shutdown,  

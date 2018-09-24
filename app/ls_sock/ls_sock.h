@@ -226,12 +226,24 @@ extern ls_accept_func  ls_accept_arr[];
 /**
  * @brief ls_connect does the type-independent connect.
  * @ingroup smart_macros
- * @param[in] same as for connect
- * @return same as for connect
+ * @param[in] same as for kernel
+ * @return f-stack is HUGELY different (see desc below)
+ * @attention f-stack requires that the socket already be set to asynchronous.
+ * Then most likely it will return -1 with an errno of EINPROGRESS.  If that 
+ * happens you must:
+ *    - Return 0 from the processing loop
+ *    - Wait for the socket to be writable (poll1 or kevent).  Return 0 until
+ *      it does.
+ *    - Do the following test for the final return code (set 'int err = 0'):
+ * @code
+ *          ls_getsockopt(sock, SOL_SOCKET, SO_ERROR, &err, &errlen)
+ * @endcode
+ *      If the function does not return -1, then check err.  If it returns 0
+ *      then the connect worked.
  */
-typedef int (*ls_connect_func)(int sockfd, const struct sockaddr *, socklen_t addrLen);
-extern ls_connect_func ls_connect_arr[];
-#define ls_connect(a,b,c) ls_connect_arr[is_usersock(a)](real_sockfd(a), b, c)
+typedef int (*ls_connect_func)(int sockfd, const struct sockaddr *sa, socklen_t addrLen);
+typedef int (*ff_connect_func)(int sockfd, const linux_sockaddr *sa, socklen_t addrLen);
+#define ls_connect(a,b,c) (int)(is_usersock(a) ? ff_connect(real_sockfd(a),(const linux_sockaddr *)b,c) : connect(a,(const sockaddr *)b,c))
 
 /**
  * @brief ls_close does the type-independent close.   
