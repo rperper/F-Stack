@@ -151,6 +151,8 @@ ngx_ff_epoll_add_event(ngx_event_t *ev, ngx_int_t event,
     ngx_event_t         *e;
     ngx_connection_t    *c;
     struct epoll_event   ee;
+    ngx_log_error(NGX_LOG_ALERT, ev->log, ngx_errno,
+                  "ff_epoll_add_event");
 
     c = ev->data;
 

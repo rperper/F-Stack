@@ -129,6 +129,8 @@ ngx_select_add_event(ngx_event_t *ev, ngx_int_t event, ngx_uint_t flags)
 
     c = ev->data;
 
+    ngx_log_error(NGX_LOG_ALERT, ev->log, 0, "select add event");
+
     ngx_log_debug2(NGX_LOG_DEBUG_EVENT, ev->log, 0,
                    "select add event fd:%d ev:%i", c->fd, event);
 

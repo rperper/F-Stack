@@ -52,6 +52,9 @@ struct ff_port_cfg {
     uint8_t port_id;
     uint8_t mac[6];
     struct ff_hw_features hw_features;
+#ifdef FF_NETMAP
+    char *if_name;
+#endif
     char *addr;
     char *netmask;
     char *broadcast;

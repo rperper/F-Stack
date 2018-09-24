@@ -165,13 +165,17 @@ int is_fstack_fd(int sockfd) {
 
     return sockfd >= ngx_max_sockets;
 }
+void *s_log;
+extern void ngx_log_error_core(unsigned int level, void *log, unsigned int err,
+    const char *fmt, ...);
 
 // proc_type, 1: primary, 0: secondary.
 int
-ff_mod_init(const char *conf, int proc_id, int proc_type) {
+ff_mod_init(const char *conf, int proc_id, int proc_type, void *log) {
     int rc, i;
     int ff_argc = 4;
 
+    s_log = log;
     char **ff_argv = malloc(sizeof(char *)*ff_argc);
     for (i = 0; i < ff_argc; i++) {
         ff_argv[i] = malloc(sizeof(char)*PATH_MAX);
@@ -185,6 +189,7 @@ ff_mod_init(const char *conf, int proc_id, int proc_type) {
     } else {
         sprintf(ff_argv[3], "--proc-type=secondary");
     }
+    ngx_log_error_core(4, s_log, 0, "ff_init called conf: %s, proc_id: %d, proc_type: %d",conf,proc_id, proc_type);
 
     rc = ff_init(ff_argc, ff_argv);
     if (rc == 0) {
@@ -243,7 +248,9 @@ socket(int domain, int type, int protocol)
     }
 
     type &= ~SOCK_FSTACK;
+    
     sock = ff_socket(domain, type, protocol);
+    ngx_log_error_core(4, s_log, 0, "ff_socket, domain: %d, type: %d, protocol: %d, socket: %d", domain, type, protocol, sock);
 
     if (sock != -1) {
         sock = convert_fstack_fd(sock);
@@ -252,11 +259,25 @@ socket(int domain, int type, int protocol)
     return sock;
 }
 
+#define STR_SOCKADDR_LEN 80
+char *str_sockaddr(const struct sockaddr *addr, char *result)
+{
+    snprintf(result, STR_SOCKADDR_LEN, "port: %u, addr: %u.%u.%u.%u", 
+             ((unsigned char *)addr)[2] * 256 + ((unsigned char *)addr)[3], 
+             ((unsigned char *)addr)[4], 
+             ((unsigned char *)addr)[5], 
+             ((unsigned char *)addr)[6], 
+             ((unsigned char *)addr)[7]);
+    return result;
+}
+
 int
 bind(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
 {
     if(is_fstack_fd(sockfd)){
         sockfd = restore_fstack_fd(sockfd);
+        char result[STR_SOCKADDR_LEN];
+        ngx_log_error_core(4, s_log, 0, "ff_bind, socket: %d, len: %d, %s", sockfd, addrlen, str_sockaddr(addr, result));
         return ff_bind(sockfd, (struct linux_sockaddr *)addr, addrlen);
     }
 
@@ -268,6 +289,8 @@ connect(int sockfd, const struct sockaddr *addr, socklen_t addrlen)
 {
     if(is_fstack_fd(sockfd)){
         sockfd = restore_fstack_fd(sockfd);
+        char result[STR_SOCKADDR_LEN];
+        ngx_log_error_core(4, s_log, 0, "ff_connect, socket: %d, %s", sockfd, str_sockaddr(addr,result));
         return ff_connect(sockfd, (struct linux_sockaddr *)addr, addrlen);
     }
 
@@ -280,6 +303,9 @@ getpeername(int sockfd, struct sockaddr * name,
 {
     if(is_fstack_fd(sockfd)){
         sockfd = restore_fstack_fd(sockfd);
+        char result[STR_SOCKADDR_LEN];
+        ngx_log_error_core(4, s_log, 0, "ff_getpeername, socket: %d %s", sockfd, str_sockaddr(name, result));
+        
         return ff_getpeername(sockfd,
             (struct linux_sockaddr *)name, namelen);
     }
@@ -293,6 +319,8 @@ getsockname(int sockfd, struct sockaddr *name,
 {
     if(is_fstack_fd(sockfd)){
         sockfd = restore_fstack_fd(sockfd);
+        char result[STR_SOCKADDR_LEN];
+        ngx_log_error_core(4, s_log, 0, "ff_getsockname, socket: %d %s", sockfd, str_sockaddr(name, result));
         return ff_getsockname(sockfd,
             (struct linux_sockaddr *)name, namelen);
     }
@@ -305,6 +333,7 @@ send(int sockfd, const void *buf, size_t len, int flags)
 {
     if(is_fstack_fd(sockfd)){
         sockfd = restore_fstack_fd(sockfd);
+        ngx_log_error_core(4, s_log, 0, "ff_send socket: %d, len: %d", sockfd, len);
         return ff_send(sockfd, buf, len, flags);
     }
 
@@ -317,6 +346,7 @@ sendto(int sockfd, const void *buf, size_t len, int flags,
 {
     if(is_fstack_fd(sockfd)){
         sockfd = restore_fstack_fd(sockfd);
+        ngx_log_error_core(4, s_log, 0, "ff_sendto called len: %d", len);
         return ff_sendto(sockfd, buf, len, flags,
             (struct linux_sockaddr *)dest_addr, addrlen);
     }
@@ -329,6 +359,7 @@ sendmsg(int sockfd, const struct msghdr *msg, int flags)
 {
     if(is_fstack_fd(sockfd)){
         sockfd = restore_fstack_fd(sockfd);
+        ngx_log_error_core(4, s_log, 0, "ff_sendmsg called flags: %d", flags);
         return ff_sendmsg(sockfd, msg, flags);
     }
 
@@ -339,6 +370,7 @@ ssize_t recvmsg(int sockfd, struct msghdr *msg, int flags)
 {
     if(is_fstack_fd(sockfd)){
         sockfd = restore_fstack_fd(sockfd);
+        ngx_log_error_core(4, s_log, 0, "ff_recvmsg max flags: %d", flags);
         return ff_recvmsg(sockfd, msg, flags);
     }
 
@@ -350,6 +382,7 @@ recv(int sockfd, void *buf, size_t len, int flags)
 {
     if(is_fstack_fd(sockfd)){
         sockfd = restore_fstack_fd(sockfd);
+        ngx_log_error_core(4, s_log, 0, "ff_recv, socket: %d max len: %d", sockfd, len);
         return ff_recv(sockfd, buf, len, flags);
     }
 
@@ -371,6 +404,7 @@ listen(int sockfd, int backlog)
 {
     if(is_fstack_fd(sockfd)){
         sockfd = restore_fstack_fd(sockfd);
+        ngx_log_error_core(4, s_log, 0, "ff_listen socket: %d, backlog: %d", sockfd, backlog);
         return ff_listen(sockfd, backlog);
     }
 
@@ -383,6 +417,7 @@ getsockopt(int sockfd, int level, int optname,
 {
     if(is_fstack_fd(sockfd)){
         sockfd = restore_fstack_fd(sockfd);
+        ngx_log_error_core(4, s_log, 0, "ff_getsockopt socket: %d, level: %d, optname: %d", sockfd, level, optname);
         return ff_getsockopt(sockfd, level, optname, optval, optlen);
     }
 
@@ -395,6 +430,7 @@ setsockopt (int sockfd, int level, int optname,
 {
     if(is_fstack_fd(sockfd)){
         sockfd = restore_fstack_fd(sockfd);
+        ngx_log_error_core(4, s_log, 0, "ff_setsockopt socket: %d, level: %d, optname: %d", sockfd, level, optname);
         return ff_setsockopt(sockfd, level, optname, optval, optlen);
     }
 
@@ -407,8 +443,16 @@ accept(int sockfd, struct sockaddr *addr, socklen_t *addrlen)
     int rc;
     if(is_fstack_fd(sockfd)){
         sockfd = restore_fstack_fd(sockfd);
+        ngx_log_error_core(4, s_log, 0, "ff_accept, socket: %d", sockfd);
         rc = ff_accept(sockfd, (struct linux_sockaddr *)addr, addrlen);
         if (rc != -1) {
+            if ((addrlen) && (addr) && (*addrlen >= 8))
+            {
+                char result[STR_SOCKADDR_LEN];
+                ngx_log_error_core(4, s_log, 0, "ff_accept, WORKED! socket: %d %s", rc, str_sockaddr(addr, result));
+            }
+            else
+                ngx_log_error_core(4, s_log, 0, "ff_accept, WORKED! socket: %d", rc);
             rc = convert_fstack_fd(rc);
         }
 
@@ -424,6 +468,7 @@ accept4(int sockfd, struct sockaddr *addr, socklen_t *addrlen, int flags)
     int rc;
     if(is_fstack_fd(sockfd)){
         sockfd = restore_fstack_fd(sockfd);
+        ngx_log_error_core(4, s_log, 0, "ff_accept4, socket: %d", sockfd);
         rc = ff_accept(sockfd, (struct linux_sockaddr *)addr, addrlen);
         if (rc != -1) {
             rc = convert_fstack_fd(rc);
@@ -440,6 +485,7 @@ close(int sockfd)
 {
     if(is_fstack_fd(sockfd)){
         sockfd = restore_fstack_fd(sockfd);
+        ngx_log_error_core(4, s_log, 0, "ff_close, socket: %d", sockfd);
         return ff_close(sockfd);
     }
 
@@ -451,6 +497,7 @@ shutdown(int sockfd, int how)
 {
     if(is_fstack_fd(sockfd)){
         sockfd = restore_fstack_fd(sockfd);
+        ngx_log_error_core(4, s_log, 0, "ff_shutdown, socket: %d", sockfd);
         return ff_shutdown(sockfd, how);
     }
 
@@ -462,6 +509,7 @@ writev(int sockfd, const struct iovec *iov, int iovcnt)
 {
     if(is_fstack_fd(sockfd)){
         sockfd = restore_fstack_fd(sockfd);
+        ngx_log_error_core(4, s_log, 0, "ff_writev, socket: %d, iovcnt: %d", sockfd, iovcnt);
         return ff_writev(sockfd, iov, iovcnt);
     }
 
@@ -473,6 +521,7 @@ readv(int sockfd, const struct iovec *iov, int iovcnt)
 {
     if(is_fstack_fd(sockfd)){
         sockfd = restore_fstack_fd(sockfd);
+        ngx_log_error_core(4, s_log, 0, "ff_readv socket: %d, iovcnt: %d", sockfd, iovcnt);
         return ff_readv(sockfd, iov, iovcnt);
     }
 
@@ -484,6 +533,7 @@ read(int sockfd, void *buf, size_t count)
 {
     if(is_fstack_fd(sockfd)){
         sockfd = restore_fstack_fd(sockfd);
+        ngx_log_error_core(4, s_log, 0, "ff_read socket: %d, max len: %d", sockfd, count);
         return ff_read(sockfd, buf, count);
     }
 
@@ -495,6 +545,7 @@ write(int sockfd, const void *buf, size_t count)
 {
     if(is_fstack_fd(sockfd)){
         sockfd = restore_fstack_fd(sockfd);
+        ngx_log_error_core(4, s_log, 0, "ff_write socket: %d, len: %d", sockfd, count);
         return ff_write(sockfd, buf, count);
     }
 
@@ -506,6 +557,7 @@ ioctl(int sockfd, int request, void *p)
 {
     if(is_fstack_fd(sockfd)){
         sockfd = restore_fstack_fd(sockfd);
+        ngx_log_error_core(4, s_log, 0, "ff_ioctl socket: %d, request: %d", sockfd, request);
         return ff_ioctl(sockfd, request, p);
     }
 
@@ -524,6 +576,8 @@ kevent(int kq, const struct kevent *changelist, int nchanges,
 {
     struct kevent     *kev;
     int                i = 0;
+    //ngx_log_error_core(4, s_log, 0, "kevent");
+    
     for(i = 0; i < nchanges; i++) {
         kev = (struct kevent *)&changelist[i];
         switch (kev->filter) {
@@ -541,8 +595,26 @@ kevent(int kq, const struct kevent *changelist, int nchanges,
         default:
             break;
         }
+        ngx_log_error_core(4, s_log, 0, "   kevent changelist #%d, nevents: %d, ident: %d, filter: %d, flags: %d, fflag: %d", i, nevents, changelist[i].ident, changelist[i].filter, changelist[i].flags, changelist[i].fflags);
     }
-    return ff_kevent(kq, changelist, nchanges, eventlist, nevents, timeout);
+    int rc;
+    
+    rc = ff_kevent(kq, changelist, nchanges, eventlist, nevents, timeout);
+    if (rc > 0)
+    {
+        ngx_log_error_core(4, s_log, 0, "kevent returned %d, nchanges: %d, nevents: %d", rc, nchanges, nevents);
+        if (timeout)
+            ngx_log_error_core(4, s_log, 0, "    timeout: sec: %l, usec: %l", timeout->tv_sec, timeout->tv_nsec);
+        for (i = 0; i <= rc; ++i)
+            ngx_log_error_core(4, s_log, 0, "   %striggered #%d, ident: %d, filter: %d, flags: %d, fflag: %d", i == rc ? "NOT " : "", i, eventlist[i].ident, eventlist[i].filter, eventlist[i].flags, eventlist[i].fflags);
+    }
+    // WARNING: ff_kevent IGNORES the timeout.  It returns 0 immediately.  It's been discussed as an issue, but ignored
+    //else
+        //if (timeout)
+            //ngx_log_error_core(4, s_log, 0, "kevent returned %d, timeout: %l %l, events: %d", rc, timeout->tv_sec, timeout->tv_nsec, nevents);
+        //else
+            //ngx_log_error_core(4, s_log, 0, "kevent returned %d, timeout: NULL, events: %d", rc, nevents);
+    return rc;
 }
 
 int

@@ -1,8 +1,8 @@
 
 # 
-# Tencent is pleased to support the open source community by making MSEC available.
+# Litespeed Technologies is pleased to support the open source community by making ls_sock available.
 # 
-# Copyright (C) 2016 THL A29 Limited, a Tencent company. All rights reserved.
+# Copyright (C) 2018 Litespeed Technologies.
 # 
 # Licensed under the GNU General Public License, Version 2.0 (the "License"); 
 # you may not use this file except in compliance with the License. You may 
@@ -20,7 +20,7 @@
 ########MAKEFILE##########
 
 ifeq ($(FF_PATH),)
-	FF_PATH= ../../
+	FF_PATH= ../../..
 endif
 
 ifeq ($(FF_DPDK),)
@@ -28,11 +28,13 @@ ifeq ($(FF_DPDK),)
 endif
 
 DEBUG= -g
-BINARY = libmt.a
+PROG=samp
+
 FF_LIBS+= -L${FF_PATH}/lib -Wl,--whole-archive,-lfstack,--no-whole-archive
 FF_LIBS+= -L${FF_DPDK}/lib -Wl,--whole-archive,-ldpdk,--no-whole-archive
 FF_LIBS+= -Wl,--no-whole-archive -lrt -lm -ldl -lcrypto -lpthread -lnuma
-
+FF_LIBS+= -L${FF_PATH}/app/ls_sock -Wl,--whole-archive,-llssock,--no-whole-archive 
+LDFLAGS+= $(FF_LIBS)
 # Comment the following line if you are not using the gnu c compiler
 #C_ARGS = -Wall -g -fPIC -D_DEBUG
 C_ARGS = -Wall -g -fPIC -O0 -DMT_REAL_TIME 
@@ -47,12 +49,12 @@ endif
 CC = g++
 
 # You shouldn't need to make any more changes below this line.
-INCCOMM=-I./valgrind -I$(FF_PATH)/lib
+INCCOMM=-I./valgrind -I$(FF_PATH)/lib -I$(FF_PATH)/app/ls_sock
 
 #.c.o:
 #	$(CC) -c $*.c
 
-all:	$(BINARY) 
+all:	$(PROG) 
 
 ### shell color config
 RED = \\e[1m\\e[31m
@@ -86,15 +88,13 @@ clean:
 	@rm -f $(BINARY) *.a *.o echo  
 
 
-LIB_OBJ = micro_thread.o kqueue_proxy.o arch_ctx.o mt_session.o mt_notify.o mt_action.o mt_mbuf_pool.o mt_api.o\
-	 mt_connection.o mt_concurrent.o mt_sys_hook.o ff_hook.o heap_timer.o  mt_cache.o  mt_net.o
+SAMP_OBJ = samp.o 
+OBJS = samp.o
 
-libmt.a: $(LIB_OBJ)
+$PROG: $(SAMP_OBJ)
 	@echo -e  Linking $(CYAN)$@$(RESET) ...$(RED)
-	@-rm -f $@ 
-	@ar crs  $@  $^ $(CRESET)
-	@chmod +x $@ 
+	${CC} ${CFLAGS} ${LDFLAGS} -o ${PROG} ${OBJS} ${LIBS}
 
-echo: echo.o libmt.a
+test-lssock: test-lssock.o liblssock.a
 	@echo -e Compile $(CYAN)$@$(RESET) ...$(RED)
 	@$(CC) -O -gdwarf-2 -o $@ $^ -lstdc++ -ldl -lm $(FF_LIBS) $(CRESET)

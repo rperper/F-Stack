@@ -28,7 +28,7 @@ static void ngx_cache_manager_process_handler(ngx_event_t *ev);
 static void ngx_cache_loader_process_handler(ngx_event_t *ev);
 
 #if (NGX_HAVE_FSTACK)
-extern int ff_mod_init(const char *conf, int proc_id, int proc_type);
+extern int ff_mod_init(const char *conf, int proc_id, int proc_type, ngx_log_t *cycle);
 #endif
 
 ngx_uint_t    ngx_process;
@@ -1049,7 +1049,7 @@ ngx_worker_process_init(ngx_cycle_t *cycle, ngx_int_t worker)
         }
 
         if (ff_mod_init((const char *)ccf->fstack_conf.data, worker,
-            ngx_ff_primary)) {
+            ngx_ff_primary, cycle->log)) {
             ngx_log_error(NGX_LOG_ALERT, cycle->log, 0,
                           "ff_mod_init failed");
             exit(2);

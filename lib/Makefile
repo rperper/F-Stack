@@ -8,6 +8,9 @@
 # Derived from FreeBSD auto-generated kernel Makefile and
 # machine-specific Makefile templates
 #
+# MODIFICATION: if you define FF_NETMAP then the netmap modules
+# will be compiled and used instead of dpdk.  Note KNI is automatically
+# disabled with NETMAP
 
 TOPDIR?=${CURDIR}/..
 S=${TOPDIR}/freebsd
@@ -19,7 +22,10 @@ HOST_OS:=$(shell uname -s)
 
 #DEBUG=-O0 -gdwarf-2 -g3 -Wno-format-truncation
 
-FF_KNI=1
+ifndef FF_NETMAP
+    FF_KNI=1
+endif
+
 #FF_NETGRAPH=1
 #FF_IPFW=1
 
@@ -58,6 +64,10 @@ endif
 
 HOST_CFLAGS+= ${DPDK_CFLAGS}
 HOST_CFLAGS+= ${CONF_CFLAGS}
+
+ifdef FF_NETMAP
+HOST_CFLAGS+= -DFF_NETMAP
+endif
 
 ifdef FF_NETGRAPH
 HOST_CFLAGS+= -DFF_NETGRAPH
@@ -171,6 +181,15 @@ FF_SRCS+=                   \
         ff_ngctl.c
 endif
 
+ifdef FF_NETMAP
+FF_HOST_SRCS+=              \
+	ff_host_interface.c \
+	ff_config.c         \
+	ff_ini_parser.c     \
+	ff_netmap_if.c      \
+	ff_epoll.c          \
+	ff_init.c
+else
 FF_HOST_SRCS+=              \
 	ff_host_interface.c \
 	ff_config.c         \
@@ -179,6 +198,7 @@ FF_HOST_SRCS+=              \
 	ff_dpdk_pcap.c      \
 	ff_epoll.c          \
 	ff_init.c
+endif
 
 ifdef FF_KNI
 FF_HOST_SRCS+=              \

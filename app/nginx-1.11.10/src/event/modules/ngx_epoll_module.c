@@ -588,6 +588,9 @@ ngx_epoll_add_event(ngx_event_t *ev, ngx_int_t event, ngx_uint_t flags)
 
     events = (uint32_t) event;
 
+    ngx_log_error(NGX_LOG_ALERT, ev->log, ngx_errno,
+                  "epoll add event");
+
     if (event == NGX_READ_EVENT) {
         e = c->write;
         prev = EPOLLOUT;

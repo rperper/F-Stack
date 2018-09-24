@@ -398,7 +398,10 @@ port_cfg_handler(struct ff_config *cfg, const char *section,
     } else if (strcmp(name, "lcore_list") == 0) {
         return parse_port_lcore_list(cur, value);
     }
-
+#ifdef FF_NETMAP
+    else if (strcmp(name, "if_name") == 0)
+        cur->if_name = strdup(value);
+#endif
     return 1;
 }
 

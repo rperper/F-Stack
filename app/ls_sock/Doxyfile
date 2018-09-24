@@ -1,0 +1,5 @@
+PROJECT_NAME="ls_sock Library for User-Land TCP/IP"
+PROJECT_BRIEF="Common methodology for accessing User-Land TCP/IP"
+OPTIMIZE_OUTPUT_FOR_C=YES
+INPUT=ls_sock.h
+GENERATE_HTML=YES
