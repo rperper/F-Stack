@@ -6,9 +6,9 @@ then
     exit 1
 fi 
 echo "Setup huge pages"
-echo 1024 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages
+echo 512 > /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages
 echo "There are `cat /sys/kernel/mm/hugepages/hugepages-2048kB/nr_hugepages` 2MB hugepages"
-echo 4 > /sys/kernel/mm/hugepages/hugepages-1048576kB/nr_hugepages
+echo 1 > /sys/kernel/mm/hugepages/hugepages-1048576kB/nr_hugepages
 echo "There are `cat /sys/kernel/mm/hugepages/hugepages-1048576kB/nr_hugepages` 1GB hugepages"
 #echo "Remove any prior user mode drivers"
 #rmmod rte_kni

@@ -27,7 +27,9 @@
 #ifndef _FF_MSG_H_
 #define _FF_MSG_H_
 
+#ifndef FF_NETMAP
 #include <rte_memory.h>
+#endif
 
 #define FF_MSG_RING_IN  "ff_msg_ring_in_"
 #define FF_MSG_RING_OUT "ff_msg_ring_out_"

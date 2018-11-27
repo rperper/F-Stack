@@ -60,26 +60,29 @@
 
 struct ff_veth_softc {
     struct ifnet *ifp;
+#ifndef FF_NETMAP    
     uint8_t mac[ETHER_ADDR_LEN];
+#endif    
     char host_ifname[IF_NAMESIZE];
-
+#ifndef FF_NETMAP    
     in_addr_t ip;
     in_addr_t netmask;
     in_addr_t broadcast;
     in_addr_t gateway;
-
+#endif
     struct ff_dpdk_if_context *host_ctx;
 };
 
 static int
 ff_veth_config(struct ff_veth_softc *sc, struct ff_port_cfg *cfg)
 {
+#ifndef FF_NETMAP
     memcpy(sc->mac, cfg->mac, ETHER_ADDR_LEN);
     inet_pton(AF_INET, cfg->addr, &sc->ip);
     inet_pton(AF_INET, cfg->netmask, &sc->netmask);
     inet_pton(AF_INET, cfg->broadcast, &sc->broadcast);
     inet_pton(AF_INET, cfg->gateway, &sc->gateway);
-
+#endif
     return 0;
 }
 
@@ -328,6 +331,7 @@ ff_veth_setup_interface(struct ff_veth_softc *sc, struct ff_port_cfg *cfg)
     ifp->if_qflush = ff_veth_qflush;
     ether_ifattach(ifp, sc->mac);
 
+#ifndef FF_NETMAP    
     if (cfg->hw_features.rx_csum) {
         ifp->if_capabilities |= IFCAP_RXCSUM;
     }
@@ -344,7 +348,8 @@ ff_veth_setup_interface(struct ff_veth_softc *sc, struct ff_port_cfg *cfg)
     }
 
     ifp->if_capenable = ifp->if_capabilities;
-
+#endif
+    
     sc->host_ctx = ff_dpdk_register_if((void *)sc, (void *)sc->ifp, cfg);
     if (sc->host_ctx == NULL) {
         printf("%s: Failed to register dpdk interface\n", sc->host_ifname);

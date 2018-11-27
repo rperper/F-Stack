@@ -147,7 +147,6 @@ ff_event_to_epoll(void **ev, struct kevent *kev)
 int 
 ff_epoll_wait(int epfd, struct epoll_event *events, int maxevents, int timeout)
 {
-    int i, ret;
     if (!events || maxevents < 1) {
         errno = EINVAL;
         return -1;

@@ -22,6 +22,8 @@ HOST_OS:=$(shell uname -s)
 
 #DEBUG=-O0 -gdwarf-2 -g3 -Wno-format-truncation
 
+FF_NETMAP=1
+
 ifndef FF_NETMAP
     FF_KNI=1
 endif
@@ -29,6 +31,8 @@ endif
 #FF_NETGRAPH=1
 #FF_IPFW=1
 
+ifdef FF_NETMAP
+else
 ifeq ($(FF_DPDK),)
     FF_DPDK=${TOPDIR}/dpdk/x86_64-native-linuxapp-gcc
 endif
@@ -36,12 +40,17 @@ endif
 ifdef RTE_SDK
     FF_DPDK=${RTE_SDK}/x86_64-native-linuxapp-gcc
 endif
+endif
 
-DPDK_CFLAGS= -Wall -Werror -include ${FF_DPDK}/include/rte_config.h
+ifdef FF_NETMAP
+DPDK_CFLAGS= -Wall -Werror -v -march=native -DFF_NETMAP -std=gnu99
+else
+DPDK_CFLAGS= -Wall -Werror -include ${FF_DPDK}/include/rte_config.h -v
 DPDK_CFLAGS+= -march=native -DRTE_MACHINE_CPUFLAG_SSE -DRTE_MACHINE_CPUFLAG_SSE2 -DRTE_MACHINE_CPUFLAG_SSE3
 DPDK_CFLAGS+= -DRTE_MACHINE_CPUFLAG_SSSE3 -DRTE_MACHINE_CPUFLAG_SSE4_1 -DRTE_MACHINE_CPUFLAG_SSE4_2
 DPDK_CFLAGS+= -DRTE_COMPILE_TIME_CPUFLAGS=RTE_CPUFLAG_SSE,RTE_CPUFLAG_SSE2,RTE_CPUFLAG_SSE3,RTE_CPUFLAG_SSSE3,RTE_CPUFLAG_SSE4_1,RTE_CPUFLAG_SSE4_2
 DPDK_CFLAGS+= -I${FF_DPDK}/include
+endif
 
 include ${TOPDIR}/mk/kern.pre.mk
 
@@ -52,6 +61,10 @@ INCLUDES+= -I./opt
 
 # Include search path for files that only include host OS headers
 HOST_INCLUDES= -I.
+ifdef FF_NETMAP
+HOST_INCLUDES+= -I${TOPDIR}/../netmap/sys -I${TOPDIR}/freebsd -I${TOPDIR}/lib/machine_include
+endif
+
 ifndef DEBUG
 HOST_CFLAGS = -O2 -frename-registers  -funswitch-loops -fweb -Wno-format-truncation
 else
@@ -126,7 +139,7 @@ CFLAGS+=${EXTRA_FLAGS} $(ARCH_FLAGS)
 HACK_EXTRA_FLAGS+=${EXTRA_FLAGS} $(ARCH_FLAGS)
 endif
 
-CFLAGS+= -DFSTACK
+CFLAGS+= -DFSTACK -DFF_NETMAP
 
 # add for LVS tcp option toa, disabled by default
 # CFLAGS+= -DLVS_TCPOPT_TOA

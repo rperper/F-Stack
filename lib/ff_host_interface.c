@@ -33,14 +33,16 @@
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
+#include <time.h>
 #include <sys/mman.h>
 #include <sys/stat.h>
 #include <pthread.h>
 #include <sched.h>
-#include <time.h>
 
 #include <openssl/rand.h>
+#ifndef FF_NETMAP
 #include <rte_malloc.h>
+#endif
 
 #include "ff_host_interface.h"
 #include "ff_errno.h"

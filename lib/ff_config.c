@@ -30,9 +30,12 @@
 #include <stdint.h>
 #include <getopt.h>
 #include <ctype.h>
+#ifndef FF_NETMAP
 #include <rte_config.h>
 #include <rte_string_fns.h>
-
+#else
+#include <errno.h>
+#endif
 #include "ff_config.h"
 #include "ff_ini_parser.h"
 
@@ -47,11 +50,14 @@ char *dpdk_argv[DPDK_CONFIG_NUM + 1];
 char* const short_options = "c:t:p:";
 struct option long_options[] = {
     { "conf", 1, NULL, 'c'},
+#ifndef FF_NETMAP    
     { "proc-type", 1, NULL, 't'},
     { "proc-id", 1, NULL, 'p'},
+#endif    
     { 0, 0, 0, 0},
 };
 
+#ifndef FF_NETMAP
 static int
 xdigit2val(unsigned char c)
 {
@@ -132,6 +138,7 @@ parse_lcore_mask(struct ff_config *cfg, const char *coremask)
 
     return 1;
 }
+#endif
 
 static int
 is_integer(const char *s)
@@ -199,6 +206,8 @@ freebsd_conf_handler(struct ff_config *cfg, const char *section,
 
     return 1;
 }
+
+#ifndef FF_NETMAP
 // A recursive binary search function. It returns location of x in
 // given array arr[l..r] is present, otherwise -1
 static int
@@ -221,6 +230,8 @@ uint16_binary_search(uint16_t arr[], int l, int r, uint16_t x)
     // We reach here when element is not present in array
     return -1;
 }
+#endif
+
 
 static int
 uint16_cmp (const void * a, const void * b)
@@ -245,6 +256,40 @@ __strstrip(char *s)
     *(++end) = '\0';
     return s;
 }
+
+
+#ifdef FF_NETMAP
+/* split string into tokens */
+static int
+rte_strsplit(char *string, int stringlen,
+             char **tokens, int maxtokens, char delim)
+{
+    int i, tok = 0;
+    int tokstart = 1; /* first token is right at start of string */
+   
+    if (string == NULL || tokens == NULL)
+        goto einval_error;
+
+    for (i = 0; i < stringlen; i++) {
+        if (string[i] == '\0' || tok >= maxtokens)
+            break;
+        if (tokstart) {
+            tokstart = 0;
+            tokens[tok++] = &string[i];
+        }
+        if (string[i] == delim) {
+            string[i] = '\0';
+            tokstart = 1;
+        }
+    }
+    return tok;
+
+einval_error:
+    errno = EINVAL;
+    return -1;
+}
+#endif
+
 
 static int
 __parse_config_list(uint16_t *arr, int *sz, const char *value) {
@@ -305,6 +350,8 @@ __parse_config_list(uint16_t *arr, int *sz, const char *value) {
     return 1;
 }
 
+
+#ifndef FF_NETMAP
 static int
 parse_port_lcore_list(struct ff_port_cfg *cfg, const char *v_str)
 {
@@ -312,6 +359,8 @@ parse_port_lcore_list(struct ff_port_cfg *cfg, const char *v_str)
     uint16_t *cores = cfg->lcore_list;
     return __parse_config_list(cores, &cfg->nb_lcores, v_str);
 }
+#endif
+
 
 static int
 parse_port_list(struct ff_config *cfg, const char *v_str)
@@ -323,6 +372,7 @@ parse_port_list(struct ff_config *cfg, const char *v_str)
     res = __parse_config_list(ports, &sz, v_str);
     if (! res) return res;
 
+#ifndef FF_NETMAP
     uint16_t *portid_list = malloc(sizeof(uint16_t)*sz);
 
     if (portid_list == NULL) {
@@ -330,40 +380,69 @@ parse_port_list(struct ff_config *cfg, const char *v_str)
         return 0;
     }
     memcpy(portid_list, ports, sz*sizeof(uint16_t));
-
+#endif
+#ifdef FF_NETMAP
+    cfg->netmap.nb_ports = sz;
+#else
     cfg->dpdk.portid_list = portid_list;
     cfg->dpdk.nb_ports = sz;
     cfg->dpdk.max_portid = portid_list[sz-1];
+#endif
     return res;
 }
+
 
 static int
 port_cfg_handler(struct ff_config *cfg, const char *section,
     const char *name, const char *value) {
 
-    if (cfg->dpdk.nb_ports == 0) {
+#ifdef FF_NETMAP
+    if (cfg->netmap.nb_ports == 0) 
+#else        
+    if (cfg->dpdk.nb_ports == 0) 
+#endif
+    {        
         fprintf(stderr, "port_cfg_handler: must config dpdk.port_list first\n");
         return 0;
     }
 
-    if (cfg->dpdk.port_cfgs == NULL) {
-        struct ff_port_cfg *pc = calloc(RTE_MAX_ETHPORTS, sizeof(struct ff_port_cfg));
+#ifdef FF_NETMAP
+    if (cfg->netmap.port_cfgs == NULL)
+#else        
+    if (cfg->dpdk.port_cfgs == NULL) 
+#endif        
+    {
+        struct ff_port_cfg *pc = calloc(RTE_MAX_ETHPORTS, 
+                                        sizeof(struct ff_port_cfg));
         if (pc == NULL) {
             fprintf(stderr, "port_cfg_handler malloc failed\n");
             return 0;
         }
         // initialize lcore list and nb_lcores
         int i;
-        for (i = 0; i < cfg->dpdk.nb_ports; ++i) {
-            uint16_t portid = cfg->dpdk.portid_list[i];
-
+#ifdef FF_NETMAP
+        for (i = 0; i < cfg->netmap.nb_ports; ++i)
+#else        
+        for (i = 0; i < cfg->dpdk.nb_ports; ++i) 
+#endif            
+        {
+            uint16_t portid = i;
+#ifndef FF_NETMAP
+            portid = cfg->dpdk.portid_list[i];
+#endif            
             struct ff_port_cfg *pconf = &pc[portid];
             pconf->port_id = portid;
+#ifndef FF_NETMAP            
             pconf->nb_lcores = ff_global_cfg.dpdk.nb_procs;
             memcpy(pconf->lcore_list, ff_global_cfg.dpdk.proc_lcore,
                    pconf->nb_lcores*sizeof(uint16_t));
+#endif            
         }
+#ifdef FF_NETMAP
+        cfg->netmap.port_cfgs = pc;
+#else        
         cfg->dpdk.port_cfgs = pc;
+#endif
     }
 
     int portid;
@@ -373,18 +452,25 @@ port_cfg_handler(struct ff_config *cfg, const char *section,
         return 0;
     }
 
+#ifndef FF_NETMAP
     /* just return true if portid >= nb_ports because it has no effect */
     if (portid > cfg->dpdk.max_portid) {
         fprintf(stderr, "port_cfg_handler section[%s] bigger than max port id\n", section);
         return 1;
     }
+#endif
 
-    struct ff_port_cfg *cur = &cfg->dpdk.port_cfgs[portid];
+    struct ff_port_cfg *cur;
+#ifdef FF_NETMAP
+    cur = &cfg->netmap.port_cfgs[portid];
+#else    
+    cur = &cfg->dpdk.port_cfgs[portid];
+#endif    
     if (cur->name == NULL) {
         cur->name = strdup(section);
         cur->port_id = portid;
     }
-
+#ifndef FF_NETMAP
     if (strcmp(name, "addr") == 0) {
         cur->addr = strdup(value);
     } else if (strcmp(name, "netmask") == 0) {
@@ -398,9 +484,6 @@ port_cfg_handler(struct ff_config *cfg, const char *section,
     } else if (strcmp(name, "lcore_list") == 0) {
         return parse_port_lcore_list(cur, value);
     }
-#ifdef FF_NETMAP
-    else if (strcmp(name, "if_name") == 0)
-        cur->if_name = strdup(value);
 #endif
     return 1;
 }
@@ -414,7 +497,12 @@ ini_parse_handler(void* user, const char* section, const char* name,
     printf("[%s]: %s=%s\n", section, name, value);
 
     #define MATCH(s, n) strcmp(section, s) == 0 && strcmp(name, n) == 0
-    if (MATCH("dpdk", "channel")) {
+#ifdef FF_NETMAP
+    if (MATCH("dpdk", "port_list")) {
+        return parse_port_list(pconfig, value);
+    } else
+#else
+    if MATCH("dpdk", "channel")) {
         pconfig->dpdk.nb_channel = atoi(value);
     } else if (MATCH("dpdk", "memory")) {
         pconfig->dpdk.memory = atoi(value);
@@ -437,7 +525,9 @@ ini_parse_handler(void* user, const char* section, const char* name,
         pconfig->dpdk.vlan_strip = atoi(value);
     } else if (MATCH("dpdk", "idle_sleep")) {
         pconfig->dpdk.idle_sleep = atoi(value);
-    } else if (MATCH("kni", "enable")) {
+    } else 
+#endif        
+    if (MATCH("kni", "enable")) {
         pconfig->kni.enable= atoi(value);
     } else if (MATCH("kni", "method")) {
         pconfig->kni.method= strdup(value);
@@ -467,8 +557,10 @@ ini_parse_handler(void* user, const char* section, const char* name,
 static int
 dpdk_args_setup(struct ff_config *cfg)
 {
-    int n = 0, i;
+    int n = 0;
     dpdk_argv[n++] = strdup("f-stack");
+#ifndef FF_NETMAP    
+    int i;
     char temp[DPDK_CONFIG_MAXLEN] = {0};
 
     if (cfg->dpdk.no_huge) {
@@ -494,7 +586,7 @@ dpdk_args_setup(struct ff_config *cfg)
         sprintf(temp, "--base-virtaddr=%s", cfg->dpdk.base_virtaddr);
         dpdk_argv[n++] = strdup(temp);
     }
-
+#endif
     dpdk_argc = n;
 
     return n;
@@ -511,17 +603,20 @@ ff_parse_args(struct ff_config *cfg, int argc, char *const argv[])
             case 'c':
                 cfg->filename = strdup(optarg);
                 break;
+#ifndef FF_NETMAP                
             case 'p':
                 cfg->dpdk.proc_id = atoi(optarg);
                 break;
             case 't':
                 cfg->dpdk.proc_type = strdup(optarg);
                 break;
+#endif
             default:
                 return -1;
         }
     }
 
+#ifndef FF_NETMAP
     if (cfg->dpdk.proc_type == NULL) {
         cfg->dpdk.proc_type = strdup("auto");
     }
@@ -537,7 +632,7 @@ ff_parse_args(struct ff_config *cfg, int argc, char *const argv[])
         printf("invalid proc_id:%d, use default 0\n", cfg->dpdk.proc_id);
         cfg->dpdk.proc_id = 0;
     }
-
+#endif
     return 0;
 }
 
@@ -568,8 +663,15 @@ ff_check_config(struct ff_config *cfg)
         } while (0)
 
     int i;
-    for (i = 0; i < cfg->dpdk.nb_ports; i++) {
-        uint16_t portid = cfg->dpdk.portid_list[i];
+#ifdef FF_NETMAP
+    for (i = 0; i< cfg->netmap.nb_ports; i++)
+#else    
+    for (i = 0; i < cfg->dpdk.nb_ports; i++) 
+#endif        
+    {
+        uint16_t portid = i;
+#ifndef FF_NETMAP
+        portid = cfg->netmap.portid_list[i];
         struct ff_port_cfg *pc = &cfg->dpdk.port_cfgs[portid];
         CHECK_VALID(addr);
         CHECK_VALID(netmask);
@@ -606,6 +708,11 @@ ff_check_config(struct ff_config *cfg)
                 return -1;
             }
         }
+#else
+        struct ff_port_cfg *pc = &cfg->netmap.port_cfgs[portid];
+        if ((!pc->name) || (pc->name[0] == 0))
+            return -1;
+#endif        
     }
 
     return 0;
@@ -618,9 +725,13 @@ ff_default_config(struct ff_config *cfg)
 
     cfg->filename = DEFAULT_CONFIG_FILE;
 
+#ifdef FF_NETMAP
+    cfg->netmap.nb_ports = 0;
+#else
     cfg->dpdk.proc_id = -1;
     cfg->dpdk.numa_on = 1;
     cfg->dpdk.promiscuous = 1;
+#endif
 
     cfg->freebsd.hz = 100;
     cfg->freebsd.physmem = 1048576*256;
@@ -638,7 +749,7 @@ ff_load_config(int argc, char *const argv[])
     }
 
     ret = ini_parse(ff_global_cfg.filename, ini_parse_handler,
-        &ff_global_cfg);
+                    &ff_global_cfg);
     if (ret != 0) {
         printf("parse %s failed on line %d\n", ff_global_cfg.filename, ret);
         return -1;

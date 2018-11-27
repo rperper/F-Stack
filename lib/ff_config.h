@@ -50,11 +50,9 @@ struct ff_hw_features {
 struct ff_port_cfg {
     char *name;
     uint8_t port_id;
+#ifndef FF_NETMAP    
     uint8_t mac[6];
     struct ff_hw_features hw_features;
-#ifdef FF_NETMAP
-    char *if_name;
-#endif
     char *addr;
     char *netmask;
     char *broadcast;
@@ -63,6 +61,7 @@ struct ff_port_cfg {
 
     int nb_lcores;
     uint16_t lcore_list[DPDK_MAX_LCORE];
+#endif    
 };
 
 struct ff_freebsd_cfg {
@@ -73,8 +72,18 @@ struct ff_freebsd_cfg {
     struct ff_freebsd_cfg *next;
 };
 
+#ifndef RTE_MAX_ETHPORTS
+#define RTE_MAX_ETHPORTS 32
+#endif
+
 struct ff_config {
     char *filename;
+#ifdef FF_NETMAP
+    struct {
+        int nb_ports;
+        struct ff_port_cfg *port_cfgs;
+    } netmap;
+#else
     struct {
         char *proc_type;
         /* mask of enabled lcores */
@@ -107,7 +116,7 @@ struct ff_config {
         // MAP(portid => struct ff_port_cfg*)
         struct ff_port_cfg *port_cfgs;
     } dpdk;
-
+#endif
     struct {
         int enable;
         char *method;

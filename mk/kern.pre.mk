@@ -24,7 +24,7 @@ _MINUS_O=	-O2
 endif
 ifeq (${MACHINE_CPUARCH},amd64)
 ifneq (${COMPILER_TYPE},clang)
-COPTFLAGS?=-O2 -fno-strict-aliasing -frename-registers -pipe -Wno-maybe-uninitialized #-finline-functions
+COPTFLAGS?=-O2 -fno-strict-aliasing -frename-registers -pipe -Wno-maybe-uninitialized -finline-functions
 else
 COPTFLAGS?=-O2 -pipe
 endif
@@ -61,7 +61,7 @@ CFLAGS+= --param large-function-growth=100000
 CFLAGS+= --param max-inline-insns-single=10000
 endif
 endif
-WERROR?= -Werror -Wno-unused-variable
+#WERROR?= -Werror -Wno-unused-variable
 
 # XXX LOCORE means "don't declare C stuff" not "for locore.s".
 ASM_CFLAGS= -x assembler-with-cpp -DLOCORE ${CFLAGS} ${KERNEL_CFLAGS}
