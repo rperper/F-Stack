@@ -44,10 +44,10 @@
  *      - Not bothering with cores.
  *      - Sockets ids appear to be tied to cores, so I'm not doing that either.
  */
-#include <sys/ctype.h>
+#include <ctype.h>
 #include <sys/types.h>
-#include <sys/param.h>
-#include <sys/time.h>
+//#include <sys/param.h>
+#include <time.h>
 #include <sys/socket.h>
 #include <sys/socketvar.h>
 #include <sys/fcntl.h>
@@ -63,13 +63,17 @@
 
 #include <libio.h>
 
-#include <net/ethernet.h>
+#include <../freebsd/sys/ctype.h>
+#undef __packed
+#define __packed        __attribute__((__packed__))
 
-#ifndef IFNAMSIZ
-#define IFNAMSIZ 16
-#endif
+#include <../freebsd/net/ethernet.h>
 
-#include "net/netmap.h"
+//#ifndef IFNAMSIZ
+//#define IFNAMSIZ 16
+//#endif
+
+//#include "net/netmap.h"
 #include "net/netmap_user.h"
 
 #include "ff_event.h"
@@ -135,14 +139,27 @@ enum FilterReturn {
     FILTER_KNI = 2,
 };
 
+/* Ethernet frame types */
+#define ETHER_TYPE_IPv4 0x0800 /**< IPv4 Protocol. */
+#define ETHER_TYPE_IPv6 0x86DD /**< IPv6 Protocol. */
+#define ETHER_TYPE_ARP  0x0806 /**< Arp Protocol. */
+#define ETHER_TYPE_RARP 0x8035 /**< Reverse Arp Protocol. */
+#define ETHER_TYPE_VLAN 0x8100 /**< IEEE 802.1Q VLAN tagging. */
+#define ETHER_TYPE_QINQ 0x88A8 /**< IEEE 802.1ad QinQ tagging. */
+#define ETHER_TYPE_1588 0x88F7 /**< IEEE 802.1AS 1588 Precise Time Protocol. */
+#define ETHER_TYPE_SLOW 0x8809 /**< Slow protocols (LACP and Marker). */
+#define ETHER_TYPE_TEB  0x6558 /**< Transparent Ethernet Bridging. */
+#define ETHER_TYPE_LLDP 0x88CC /**< LLDP Protocol. */
+
 extern void ff_hardclock(void);
 
+/*
 static void
 ff_hardclock_job(void) {
     ff_hardclock();
     ff_update_current_ts();
 }
-
+*/
 struct ff_dpdk_if_context *
 ff_dpdk_register_if(void *sc, void *ifp, struct ff_port_cfg *cfg)
 {
@@ -189,11 +206,14 @@ ff_dpdk_deregister_if(struct ff_dpdk_if_context *ctx)
     ctx->active = 0;        
 }
 
+/*
 static void
 check_all_ports_link_status(void)
 {
     // Don't try to bring them up here, we'll do that later
 }
+*/
+
 
 static int
 init_clock(void)
@@ -229,7 +249,7 @@ ff_dpdk_init(int argc, char **argv)
     int i;
     for (i = 0; i < ff_global_cfg.netmap.nb_ports; ++i)
     {
-        ctx[i].cfg = ff_global_cfg.netmap.port_cfgs[i];
+        ctx[i].cfg = &ff_global_cfg.netmap.port_cfgs[i];
         ctx[i].port_id = i;
     }
 
@@ -239,7 +259,7 @@ ff_dpdk_init(int argc, char **argv)
 }
 
 
-static char *netmap_read(int *len)
+static char *netmap_read(struct ff_dpdk_if_context *ctx, int *len)
 {
     struct pollfd pfd;
     
@@ -257,8 +277,8 @@ static char *netmap_read(int *len)
         return NULL;
     }
     
-    struct netmap_slot *slot = &ctx->rx_ring.slot[ctx->rx_ring.head];
-    char *data = NETMAP_BUF(ctx->netmapif->rx_ring,
+    struct netmap_slot *slot = &ctx->rx_ring->slot[ctx->rx_ring->head];
+    char *data = NETMAP_BUF(ctx->rx_ring,
                             slot->buf_idx);
     *len = slot->len;
     return data;
@@ -269,20 +289,17 @@ static void
 ff_veth_input(const struct ff_dpdk_if_context *ctx, char *data, int len)
 {
     /* For testing purposes, receive and process only one packet at a time.  */
-    int ret;
-    
     if (!data)
         return;
     
-    struct netmap_slot *slot = &ctx->rx_ring.slot[ctx->rx_ring.head];
+    //struct netmap_slot *slot = &ctx->rx_ring->slot[ctx->rx_ring->head];
     void *hdr = ff_mbuf_gethdr(NULL, len, data, len, 0/*rx_csum*/);
 
     ff_veth_process_packet(ctx->ifp, hdr);
     
-    ctx->rx_ring->head = nm_ring_next(&ctx->rx_ring, ctx->rx_ring->head);
+    ctx->rx_ring->head = nm_ring_next(ctx->rx_ring, ctx->rx_ring->head);
     // consume the packet
-    ret = ioctl(s_netmapfd, NIOCTXSYNC, 0);
-    return ret;
+    ioctl(s_netmapfd, NIOCTXSYNC, 0);
 }
 
 
@@ -292,8 +309,8 @@ protocol_filter(const void *data, uint16_t len)
     if(len < ETHER_HDR_LEN)
         return FILTER_UNKNOWN;
 
-    const struct ether_hdr *hdr;
-    hdr = (const struct ether_hdr *)data;
+    const struct ether_header *hdr;
+    hdr = (const struct ether_header *)data;
 
     if(ntohs(hdr->ether_type) == ETHER_TYPE_ARP)
         return FILTER_ARP;
@@ -544,8 +561,8 @@ ff_dpdk_if_send(struct ff_dpdk_if_context *ctx, void *m,
         return -1;
     }
     
-    struct netmap_slot *slot = &ctx->tx_ring.slot[ctx->tx_ring.head];
-    ret = ff_mbuf_copydata(m, NETMAP_BUF(ctx->netmapif->tx_ring, 
+    struct netmap_slot *slot = &ctx->tx_ring->slot[ctx->tx_ring->head];
+    ret = ff_mbuf_copydata(m, NETMAP_BUF(ctx->tx_ring, 
                                          slot->buf_idx), 
                            0, total);
     slot->len = total;
@@ -554,7 +571,7 @@ ff_dpdk_if_send(struct ff_dpdk_if_context *ctx, void *m,
     {
         return -1;
     }
-    ctx->tx_ring->head = nm_ring_next(&ctx->tx_ring, ctx->tx_ring->head);
+    ctx->tx_ring->head = nm_ring_next(ctx->tx_ring, ctx->tx_ring->head);
     ret = ioctl(s_netmapfd, NIOCTXSYNC, 0);
     return ret;
 }
@@ -563,20 +580,22 @@ static int
 main_loop(loop_func_t loop, void *arg)
 {
     //struct mbuf *pkts_burst[MAX_PKT_BURST];
-    uint64_t prev_tsc, diff_tsc, cur_tsc, usch_tsc, div_tsc, usr_tsc, sys_tsc, 
-             end_tsc, idle_sleep_tsc;
-    int i, j, nb_rx, idle;
-    uint16_t port_id, queue_id;
+#define EXPIRE_NS       10    
+    uint64_t /*prev_tsc, */cur_tsc, usch_tsc, div_tsc, usr_tsc, sys_tsc, 
+             end_tsc, idle_sleep_tsc, expire_tsc;
+    int i, idle;
+    uint16_t port_id;
     const uint64_t drain_tsc = (ff_get_tsc_ns() + US_PER_S - 1) /
                                 US_PER_S * BURST_TX_DRAIN_US;
     struct ff_dpdk_if_context *ctx;
 
-    prev_tsc = 0;
+    //prev_tsc = 0;
     usch_tsc = 0;
 
     while (1) {
         cur_tsc = ff_get_tsc_ns();
-        if (unlikely(freebsd_clock.expire < cur_tsc)) {
+        expire_tsc = cur_tsc + EXPIRE_NS;
+        if (unlikely(expire_tsc < cur_tsc)) {
             //timer_manage(); Keep this as a reminder to watch a timer (DPDK only?).
         }
 
@@ -607,9 +626,9 @@ main_loop(loop_func_t loop, void *arg)
          */
         for (i = 0; i < ff_global_cfg.netmap.nb_ports; ++i) {
             port_id = s_context[i].port_id;
-            ctx = s_context[port_id];
+            ctx = &s_context[port_id];
             int len;
-            char *data = netmap_read(&len);
+            char *data = netmap_read(ctx, &len);
             if (!data)
                 continue;
             idle = 0;
@@ -660,7 +679,7 @@ int
 ff_dpdk_if_up(void) {
     int i;
     for (i = 0; i < ff_global_cfg.netmap.nb_ports; i++) {
-        if (ff_veth_attach(ff_global_cfg.netmap.port_cfgs[i]) == NULL)
+        if (ff_veth_attach(&ff_global_cfg.netmap.port_cfgs[i]) == NULL)
         {
             return -1;
         }
@@ -717,14 +736,6 @@ int
 ff_rss_check(void *softc, uint32_t saddr, uint32_t daddr,
     uint16_t sport, uint16_t dport)
 {
-    struct lcore_conf *qconf = &lcore_conf;
-    struct ff_dpdk_if_context *ctx = ff_veth_softc_to_hostc(softc);
-    uint16_t nb_queues = qconf->nb_queue_list[ctx->port_id];
-
-    if (nb_queues <= 1) {
-        return 1;
-    }
-
 #define ETH_RSS_RETA_NUM_ENTRIES 128 // The default
     uint16_t reta_size = ETH_RSS_RETA_NUM_ENTRIES;//rss_reta_size[ctx->port_id];
     //uint16_t queueid = qconf->tx_queue_id[ctx->port_id];
@@ -749,7 +760,7 @@ ff_rss_check(void *softc, uint32_t saddr, uint32_t daddr,
     uint32_t hash = toeplitz_hash(sizeof(default_rsskey_40bytes),
         default_rsskey_40bytes, datalen, data);
 
-    return ((hash & (reta_size - 1)) % nb_queues) == 0;//queueid;
+    return ((hash & (reta_size - 1)) % reta_size) == 0;//queueid;
 }
 
 uint64_t

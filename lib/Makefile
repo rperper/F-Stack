@@ -62,7 +62,7 @@ INCLUDES+= -I./opt
 # Include search path for files that only include host OS headers
 HOST_INCLUDES= -I.
 ifdef FF_NETMAP
-HOST_INCLUDES+= -I${TOPDIR}/../netmap/sys -I${TOPDIR}/freebsd -I${TOPDIR}/lib/machine_include
+HOST_INCLUDES+= -nostdinc -I. -I/usr/include -I/usr/lib64/gcc/x86_64-suse-linux/4.8/include/ -I${TOPDIR}/../netmap/sys -I${TOPDIR}/freebsd -I${TOPDIR}/lib/machine_include
 endif
 
 ifndef DEBUG

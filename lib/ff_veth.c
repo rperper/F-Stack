@@ -262,6 +262,9 @@ ff_veth_qflush(struct ifnet *ifp)
 static int
 ff_veth_setaddr(struct ff_veth_softc *sc)
 {
+#ifdef FF_NETMAP
+    return 0;
+#else
     struct in_aliasreq req;
     bzero(&req, sizeof req);
     strcpy(req.ifra_name, sc->ifp->if_dname);
@@ -286,11 +289,15 @@ ff_veth_setaddr(struct ff_veth_softc *sc)
     sofree(so);
 
     return ret;
+#endif    
 }
 
 static int
 ff_veth_set_gateway(struct ff_veth_softc *sc)
 {
+#ifdef FF_NETMAP
+    return 0;
+#else
     struct sockaddr_in gw;
     bzero(&gw, sizeof(gw));
     gw.sin_len = sizeof(gw);
@@ -311,6 +318,7 @@ ff_veth_set_gateway(struct ff_veth_softc *sc)
 
     return rtrequest_fib(RTM_ADD, (struct sockaddr *)&dst, (struct sockaddr *)&gw,
         (struct sockaddr *)&nm, RTF_GATEWAY, NULL, RT_DEFAULT_FIB);
+#endif    
 }
 
 static int
@@ -329,9 +337,10 @@ ff_veth_setup_interface(struct ff_veth_softc *sc, struct ff_port_cfg *cfg)
     ifp->if_start = ff_veth_start;
     ifp->if_transmit = ff_veth_transmit;
     ifp->if_qflush = ff_veth_qflush;
+#ifdef FF_NETMAP
+    ether_ifattach(ifp, "");
+#else
     ether_ifattach(ifp, sc->mac);
-
-#ifndef FF_NETMAP    
     if (cfg->hw_features.rx_csum) {
         ifp->if_capabilities |= IFCAP_RXCSUM;
     }
