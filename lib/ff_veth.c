@@ -56,7 +56,11 @@
 
 #include "ff_veth.h"
 #include "ff_config.h"
+#ifdef FF_NETMAP
+#include "ff_netmap_if.h"
+#else
 #include "ff_dpdk_if.h"
+#endif
 
 struct ff_veth_softc {
     struct ifnet *ifp;
@@ -69,8 +73,10 @@ struct ff_veth_softc {
     in_addr_t netmask;
     in_addr_t broadcast;
     in_addr_t gateway;
-#endif
     struct ff_dpdk_if_context *host_ctx;
+#else
+    struct ff_netmap_if_context *host_ctx;
+#endif
 };
 
 static int
@@ -134,7 +140,7 @@ ff_veth_ioctl(struct ifnet *ifp, u_long cmd, caddr_t data)
 int
 ff_mbuf_copydata(void *m, void *data, int off, int len)
 {
-    int ret;
+    //int ret;
     struct mbuf *mb = (struct mbuf *)m;
 
     if (off + len > mb->m_pkthdr.len) {
@@ -149,6 +155,7 @@ ff_mbuf_copydata(void *m, void *data, int off, int len)
 void
 ff_mbuf_tx_offload(void *m, struct ff_tx_offload *offload)
 {
+#ifndef FF_NETMAP    
     struct mbuf *mb = (struct mbuf *)m;
     if (mb->m_pkthdr.csum_flags & CSUM_IP) {
         offload->ip_csum = 1;
@@ -169,6 +176,7 @@ ff_mbuf_tx_offload(void *m, struct ff_tx_offload *offload)
     if (mb->m_pkthdr.csum_flags & CSUM_TSO) {
         offload->tso_seg_size = mb->m_pkthdr.tso_segsz;
     }
+#endif
 }
 
 void
@@ -180,7 +188,11 @@ ff_mbuf_free(void *m)
 static void
 ff_mbuf_ext_free(struct mbuf *m, void *arg1, void *arg2)
 {
+#ifdef FF_NETMAP
+    ff_netmap_pktmbuf_free(arg1);
+#else    
     ff_dpdk_pktmbuf_free(arg1);
+#endif
 }
 
 void *
@@ -250,7 +262,11 @@ static int
 ff_veth_transmit(struct ifnet *ifp, struct mbuf *m)
 {
     struct ff_veth_softc *sc = (struct ff_veth_softc *)ifp->if_softc;
+#ifdef FF_NETMAP
+    return ff_netmap_if_send(sc->host_ctx, (void*)m, m->m_pkthdr.len);
+#else    
     return ff_dpdk_if_send(sc->host_ctx, (void*)m, m->m_pkthdr.len);
+#endif
 }
 
 static void
@@ -359,9 +375,14 @@ ff_veth_setup_interface(struct ff_veth_softc *sc, struct ff_port_cfg *cfg)
     ifp->if_capenable = ifp->if_capabilities;
 #endif
     
+#ifdef FF_NETMAP    
+    sc->host_ctx = ff_netmap_register_if((void *)sc, (void *)sc->ifp, cfg);
+#else    
     sc->host_ctx = ff_dpdk_register_if((void *)sc, (void *)sc->ifp, cfg);
+#endif    
     if (sc->host_ctx == NULL) {
-        printf("%s: Failed to register dpdk interface\n", sc->host_ifname);
+        printf("%s: Failed to register network user-level interface\n", 
+               sc->host_ifname);
         return -1;
     }
 
@@ -407,7 +428,11 @@ ff_veth_attach(struct ff_port_cfg *cfg)
 fail:
     if (sc) {
         if (sc->host_ctx)
+#ifdef FF_NETMAP
+            ff_netmap_deregister_if(sc->host_ctx);
+#else            
             ff_dpdk_deregister_if(sc->host_ctx);
+#endif            
 
         free(sc, M_DEVBUF);
     }
@@ -420,7 +445,11 @@ ff_veth_detach(void *arg)
 {
     struct ff_veth_softc *sc = (struct ff_veth_softc *)arg;
     if (sc) {
+#ifdef FF_NETMAP        
+        ff_netmap_deregister_if(sc->host_ctx);
+#else        
         ff_dpdk_deregister_if(sc->host_ctx);
+#endif        
         free(sc, M_DEVBUF);
     }
 

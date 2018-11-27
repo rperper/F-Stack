@@ -28,7 +28,11 @@
 
 #include "ff_api.h"
 #include "ff_config.h"
+#ifdef FF_NETMAP
+#include "ff_netmap_if.h"
+#else
 #include "ff_dpdk_if.h"
+#endif
 
 extern int ff_freebsd_init();
 
@@ -40,7 +44,11 @@ ff_init(int argc, char * const argv[])
     if (ret < 0)
         exit(1);
 
+#ifdef FF_NETMAP    
+    ret = ff_netmap_init(dpdk_argc, (char **)&dpdk_argv);
+#else    
     ret = ff_dpdk_init(dpdk_argc, (char **)&dpdk_argv);
+#endif    
     if (ret < 0)
         exit(1);
 
@@ -48,7 +56,11 @@ ff_init(int argc, char * const argv[])
     if (ret < 0)
         exit(1);
 
+#ifdef FF_NETMAP    
+    ret = ff_netmap_if_up();
+#else    
     ret = ff_dpdk_if_up();
+#endif    
     if (ret < 0)
         exit(1);
 
@@ -58,6 +70,10 @@ ff_init(int argc, char * const argv[])
 void
 ff_run(loop_func_t loop, void *arg)
 {
+#ifdef FF_NETMAP    
+    ff_netmap_run(loop, arg);
+#else    
     ff_dpdk_run(loop, arg);
+#endif    
 }
 

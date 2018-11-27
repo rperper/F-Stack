@@ -1,43 +1,20 @@
-/*
- * Copyright (C) 2017 THL A29 Limited, a Tencent company.
- * All rights reserved.
- *
- * Redistribution and use in source and binary forms, with or without
- * modification, are permitted provided that the following conditions are met:
- *
- * 1. Redistributions of source code must retain the above copyright notice, this
- *   list of conditions and the following disclaimer.
- * 2. Redistributions in binary form must reproduce the above copyright notice,
- *   this list of conditions and the following disclaimer in the documentation
- *   and/or other materials provided with the distribution.
- *
- * THIS SOFTWARE IS PROVIDED BY THE COPYRIGHT HOLDERS AND CONTRIBUTORS "AS IS" AND
- * ANY EXPRESS OR IMPLIED WARRANTIES, INCLUDING, BUT NOT LIMITED TO, THE IMPLIED
- * WARRANTIES OF MERCHANTABILITY AND FITNESS FOR A PARTICULAR PURPOSE ARE
- * DISCLAIMED. IN NO EVENT SHALL THE COPYRIGHT OWNER OR CONTRIBUTORS BE LIABLE FOR
- * ANY DIRECT, INDIRECT, INCIDENTAL, SPECIAL, EXEMPLARY, OR CONSEQUENTIAL DAMAGES
- * (INCLUDING, BUT NOT LIMITED TO, PROCUREMENT OF SUBSTITUTE GOODS OR SERVICES;
- * LOSS OF USE, DATA, OR PROFITS; OR BUSINESS INTERRUPTION) HOWEVER CAUSED AND
- * ON ANY THEORY OF LIABILITY, WHETHER IN CONTRACT, STRICT LIABILITY, OR TORT
- * (INCLUDING NEGLIGENCE OR OTHERWISE) ARISING IN ANY WAY OUT OF THE USE OF THIS
- * SOFTWARE, EVEN IF ADVISED OF THE POSSIBILITY OF SUCH DAMAGE.
- *
- */
-/** 
- * A short explanation of F-Stack as implemented here.  The 'meat' of F-Stack
- * is FreeBSD and all of it's kernel implementation.  The F-Stack people pulled
- * the FreeBSD kernel out into user space, but pretend that it's still a 
- * kernel module.  That means that there are user space modules, and kernel
- * space modules.  
- * In the Makefile the FF_SRCS are "kernel" modules and MUST AT ALL TIMES 
- * FOLLOW MOST KERNEL RULES!.  
- * FF_HOST_SRCS are "user space" modules and must follow user space rules.  
- * The boundary is critical.  For Netmap (just as for dpdk) ff_netmap_if.c 
- * (ff_dpdk_if.c for DPDK) is the bottom level "user space" module.  
- * And ff_veth.c is the top level "kernel" space module. 
- * Since Netmap is a user space module, all actual calls to access it are made
- * here.  But the processing of the packets is done within ff_veth.
- */
+/*****************************************************************************
+*    Copyright (C) 2018  LiteSpeed Technologies, Inc.                        *
+*                                                                            *
+*    This program is free software: you can redistribute it and/or modify    *
+*    it under the terms of the GNU General Public License as published by    *
+*    the Free Software Foundation, either version 3 of the License, or       *
+*    (at your option) any later version.                                     *
+*                                                                            *
+*    This program is distributed in the hope that it will be useful,         *
+*    but WITHOUT ANY WARRANTY; without even the implied warranty of          *
+*    MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the            *
+*    GNU General Public License for more details.                            *
+*                                                                            *
+*    You should have received a copy of the GNU General Public License       *
+*    along with this program. If not, see http://www.gnu.org/licenses/.      *
+*                                                                            *
+******************************************************************************/
 
 /**
  * Porting notes:
@@ -77,7 +54,7 @@
 #include "net/netmap_user.h"
 
 #include "ff_event.h"
-#include "ff_dpdk_if.h" // Use the same interface as DPDK
+#include "ff_netmap_if.h"
 #include "ff_config.h"
 #include "ff_veth.h"
 #include "ff_host_interface.h"
@@ -111,7 +88,7 @@ struct mbuf_table {
     struct mbuf *m_table[MAX_PKT_BURST];
 };
 
-struct ff_dpdk_if_context {
+struct ff_netmap_if_context {
     void               *sc;     // veth_softc structure
     void               *ifp;    // In veth_softc structure, the ifnet structure
     uint16_t            port_id;
@@ -128,7 +105,7 @@ struct ff_dpdk_if_context {
     //struct ff_hw_features hw_features;
 } ;//__rte_cache_aligned;
 
-static struct ff_dpdk_if_context *s_context = NULL;
+static struct ff_netmap_if_context *s_context = NULL;
 
 static struct ff_top_args ff_top_status;
 static struct ff_traffic_args ff_traffic;
@@ -160,10 +137,10 @@ ff_hardclock_job(void) {
     ff_update_current_ts();
 }
 */
-struct ff_dpdk_if_context *
-ff_dpdk_register_if(void *sc, void *ifp, struct ff_port_cfg *cfg)
+struct ff_netmap_if_context *
+ff_netmap_register_if(void *sc, void *ifp, struct ff_port_cfg *cfg)
 {
-    struct ff_dpdk_if_context *ctx = &s_context[cfg->port_id];
+    struct ff_netmap_if_context *ctx = &s_context[cfg->port_id];
 
     ctx->sc = sc;
     ctx->ifp = ifp;
@@ -193,7 +170,7 @@ ff_dpdk_register_if(void *sc, void *ifp, struct ff_port_cfg *cfg)
 }
 
 void
-ff_dpdk_deregister_if(struct ff_dpdk_if_context *ctx)
+ff_netmap_deregister_if(struct ff_netmap_if_context *ctx)
 {
     //free(ctx);
     // Don't see any netmap functions for this!
@@ -224,9 +201,9 @@ init_clock(void)
 }
 
 int
-ff_dpdk_init(int argc, char **argv)
+ff_netmap_init(int argc, char **argv)
 {
-    struct ff_dpdk_if_context *ctx;
+    struct ff_netmap_if_context *ctx;
     if (s_netmapfd == -1)
     {
         s_netmapfd = open("/dev/netmap", O_RDWR);
@@ -234,7 +211,7 @@ ff_dpdk_init(int argc, char **argv)
             return -1;
     }
 
-    ctx = ff_malloc(sizeof(struct ff_dpdk_if_context) * 
+    ctx = ff_malloc(sizeof(struct ff_netmap_if_context) * 
                     ff_global_cfg.netmap.nb_ports);
     if (ctx == NULL)
     {
@@ -242,7 +219,7 @@ ff_dpdk_init(int argc, char **argv)
         s_netmapfd = -1;
         return -1;
     }
-    memset(ctx, 0, sizeof(struct ff_dpdk_if_context) * 
+    memset(ctx, 0, sizeof(struct ff_netmap_if_context) * 
                    ff_global_cfg.netmap.nb_ports);
     s_context = ctx;
     
@@ -259,7 +236,7 @@ ff_dpdk_init(int argc, char **argv)
 }
 
 
-static char *netmap_read(struct ff_dpdk_if_context *ctx, int *len)
+static char *netmap_read(struct ff_netmap_if_context *ctx, int *len)
 {
     struct pollfd pfd;
     
@@ -286,7 +263,7 @@ static char *netmap_read(struct ff_dpdk_if_context *ctx, int *len)
 
 
 static void
-ff_veth_input(const struct ff_dpdk_if_context *ctx, char *data, int len)
+ff_veth_input(const struct ff_netmap_if_context *ctx, char *data, int len)
 {
     /* For testing purposes, receive and process only one packet at a time.  */
     if (!data)
@@ -332,7 +309,7 @@ protocol_filter(const void *data, uint16_t len)
 
 
 static inline void
-process_packets(uint16_t port_id, const struct ff_dpdk_if_context *ctx,
+process_packets(uint16_t port_id, const struct ff_netmap_if_context *ctx,
                 char *data, int len)
 {
     enum FilterReturn filter = protocol_filter(data, len);
@@ -534,7 +511,7 @@ process_msg_ring(uint16_t proc_id)
 }
 
 int
-ff_dpdk_if_send(struct ff_dpdk_if_context *ctx, void *m,
+ff_netmap_if_send(struct ff_netmap_if_context *ctx, void *m,
     int total)
 {
     /* For testing purposes, simply send the packet RIGHT NOW! */
@@ -587,7 +564,7 @@ main_loop(loop_func_t loop, void *arg)
     uint16_t port_id;
     const uint64_t drain_tsc = (ff_get_tsc_ns() + US_PER_S - 1) /
                                 US_PER_S * BURST_TX_DRAIN_US;
-    struct ff_dpdk_if_context *ctx;
+    struct ff_netmap_if_context *ctx;
 
     //prev_tsc = 0;
     usch_tsc = 0;
@@ -676,7 +653,7 @@ main_loop(loop_func_t loop, void *arg)
 }
 
 int
-ff_dpdk_if_up(void) {
+ff_netmap_if_up(void) {
     int i;
     for (i = 0; i < ff_global_cfg.netmap.nb_ports; i++) {
         if (ff_veth_attach(&ff_global_cfg.netmap.port_cfgs[i]) == NULL)
@@ -691,7 +668,7 @@ ff_dpdk_if_up(void) {
 
 // EXPORTED AS ff_run!!!
 void
-ff_dpdk_run(loop_func_t loop, void *arg) {
+ff_netmap_run(loop_func_t loop, void *arg) {
     main_loop(loop, arg);
     //struct loop_routine *lr = rte_malloc(NULL,
     //    sizeof(struct loop_routine), 0);
@@ -703,7 +680,7 @@ ff_dpdk_run(loop_func_t loop, void *arg) {
 }
 
 void
-ff_dpdk_pktmbuf_free(void *m)
+ff_netmap_pktmbuf_free(void *m)
 {
     // I believe we don't need to free anything (since it's mmap'd).
     //rte_pktmbuf_free((struct rte_mbuf *)m);
