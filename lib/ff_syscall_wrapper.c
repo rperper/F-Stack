@@ -492,8 +492,9 @@ ff_setsockopt(int s, int level, int optname, const void *optval,
 
     if ((rc = kern_setsockopt(curthread, s, level, optname,
             __DECONST(void *, optval), UIO_USERSPACE, optlen)))
+    {
         goto kern_fail;
-
+    }
     return (rc);
 
 kern_fail:

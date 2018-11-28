@@ -467,7 +467,13 @@ port_cfg_handler(struct ff_config *cfg, const char *section,
     cur = &cfg->dpdk.port_cfgs[portid];
 #endif    
     if (cur->name == NULL) {
+#ifdef FF_NETMAP
+        char name[256];
+        snprintf(name, sizeof(name), "eth%d", portid);
+        cur->name = strdup(name);
+#else
         cur->name = strdup(section);
+#endif
         cur->port_id = portid;
     }
 #ifndef FF_NETMAP

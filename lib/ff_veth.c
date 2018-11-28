@@ -68,10 +68,10 @@ struct ff_veth_softc {
     uint8_t mac[ETHER_ADDR_LEN];
 #endif    
     char host_ifname[IF_NAMESIZE];
-#ifndef FF_NETMAP    
     in_addr_t ip;
     in_addr_t netmask;
     in_addr_t broadcast;
+#ifndef FF_NETMAP    
     in_addr_t gateway;
     struct ff_dpdk_if_context *host_ctx;
 #else
@@ -82,11 +82,11 @@ struct ff_veth_softc {
 static int
 ff_veth_config(struct ff_veth_softc *sc, struct ff_port_cfg *cfg)
 {
-#ifndef FF_NETMAP
-    memcpy(sc->mac, cfg->mac, ETHER_ADDR_LEN);
     inet_pton(AF_INET, cfg->addr, &sc->ip);
     inet_pton(AF_INET, cfg->netmask, &sc->netmask);
     inet_pton(AF_INET, cfg->broadcast, &sc->broadcast);
+#ifndef FF_NETMAP
+    memcpy(sc->mac, cfg->mac, ETHER_ADDR_LEN);
     inet_pton(AF_INET, cfg->gateway, &sc->gateway);
 #endif
     return 0;
@@ -278,9 +278,6 @@ ff_veth_qflush(struct ifnet *ifp)
 static int
 ff_veth_setaddr(struct ff_veth_softc *sc)
 {
-#ifdef FF_NETMAP
-    return 0;
-#else
     struct in_aliasreq req;
     bzero(&req, sizeof req);
     strcpy(req.ifra_name, sc->ifp->if_dname);
@@ -305,7 +302,6 @@ ff_veth_setaddr(struct ff_veth_softc *sc)
     sofree(so);
 
     return ret;
-#endif    
 }
 
 static int

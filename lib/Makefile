@@ -20,7 +20,7 @@ X86_INCLUDES=0
 
 HOST_OS:=$(shell uname -s)
 
-#DEBUG=-O0 -gdwarf-2 -g3 -Wno-format-truncation
+DEBUG=-O0 -gdwarf-2 -g3 -Wno-format-truncation
 
 FF_NETMAP=1
 

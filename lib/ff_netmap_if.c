@@ -35,6 +35,8 @@
 #include <sys/errno.h>
 #include <sys/mman.h>
 #include <sys/ioctl.h>
+#include <sys/types.h>
+#include <sys/wait.h>
 
 #include <netinet/in.h>
 
@@ -141,7 +143,8 @@ struct ff_netmap_if_context *
 ff_netmap_register_if(void *sc, void *ifp, struct ff_port_cfg *cfg)
 {
     struct ff_netmap_if_context *ctx = &s_context[cfg->port_id];
-
+    printf("Registering if\n");
+    printf("   Name: %s\n", cfg->name);
     ctx->sc = sc;
     ctx->ifp = ifp;
     ctx->port_id = cfg->port_id;
@@ -166,6 +169,8 @@ ff_netmap_register_if(void *sc, void *ifp, struct ff_port_cfg *cfg)
     ctx->tx_ring = NETMAP_TXRING(ctx->netmapif, 0);
     ctx->rx_ring = NETMAP_RXRING(ctx->netmapif, 0);
     ctx->active = 1;
+    printf("Registering if successful\n");
+    
     return ctx;
 }
 
@@ -174,6 +179,7 @@ ff_netmap_deregister_if(struct ff_netmap_if_context *ctx)
 {
     //free(ctx);
     // Don't see any netmap functions for this!
+    printf("Deregister if\n");
     if (ctx->map)
     {
         ff_munmap(ctx->map, ctx->req.nr_memsize);
@@ -204,13 +210,15 @@ int
 ff_netmap_init(int argc, char **argv)
 {
     struct ff_netmap_if_context *ctx;
+    printf("ff_netmap_init\n");
     if (s_netmapfd == -1)
     {
+        printf("open device\n");
         s_netmapfd = open("/dev/netmap", O_RDWR);
         if (s_netmapfd == -1)
             return -1;
     }
-
+    printf("allocate context\n");
     ctx = ff_malloc(sizeof(struct ff_netmap_if_context) * 
                     ff_global_cfg.netmap.nb_ports);
     if (ctx == NULL)
@@ -232,6 +240,7 @@ ff_netmap_init(int argc, char **argv)
 
     init_clock();
 
+    printf("ff_netmap_init ok\n");
     return 0;
 }
 
@@ -315,7 +324,7 @@ process_packets(uint16_t port_id, const struct ff_netmap_if_context *ctx,
     enum FilterReturn filter = protocol_filter(data, len);
     if (filter == FILTER_ARP) {
         // The original code has it deep copied.  For now just don't dequeue it
-
+        printf("Process ARP packet\n");
 #ifdef FF_KNI
         if (enable_kni && rte_eal_process_type() == RTE_PROC_PRIMARY) {
             mbuf_pool = pktmbuf_pool[qconf->socket_id];
@@ -326,7 +335,7 @@ process_packets(uint16_t port_id, const struct ff_netmap_if_context *ctx,
         }
 #endif
         //..and ignore it for now...
-        //ff_veth_input(ctx, data, len);
+        ff_veth_input(ctx, data, len);
 #ifdef FF_KNI
     } else if (enable_kni &&
         ((filter == FILTER_KNI && kni_accept) ||
@@ -334,6 +343,7 @@ process_packets(uint16_t port_id, const struct ff_netmap_if_context *ctx,
         ff_kni_enqueue(port_id, rtem);
 #endif
     } else {
+        printf("Process packet\n");
         ff_veth_input(ctx, data, len);
     }
 }
@@ -569,6 +579,8 @@ main_loop(loop_func_t loop, void *arg)
     //prev_tsc = 0;
     usch_tsc = 0;
 
+    printf("ff_netmap start main_loop\n");
+
     while (1) {
         cur_tsc = ff_get_tsc_ns();
         expire_tsc = cur_tsc + EXPIRE_NS;
@@ -652,15 +664,123 @@ main_loop(loop_func_t loop, void *arg)
     return 0;
 }
 
+
+static char *
+eth_field(struct ff_port_cfg *cfg, char *devbuf, const char *title, char sep)
+{
+    char *pos = strstr(devbuf, title);
+    if (!pos)
+    {
+        fprintf(stderr, "Port %s has no %s.  Can't be used\n", cfg->name, 
+                title);
+        return NULL;
+    }
+    char *ssep = strchr(pos + strlen(title), sep);
+    if (!ssep)
+    {
+        fprintf(stderr, "Port %s has no %s followed by a separator.  "
+                "Can't be used\n", cfg->name, title);
+        return NULL;
+    }
+    *ssep = 0;
+    char *dup = strdup(pos + strlen(title));
+    if (!dup)
+    {
+        fprintf(stderr, "During port parsing, insufficient memory\n");
+        return NULL;
+    }
+    return dup;
+}
+
+
+static int 
+get_port_addr(struct ff_port_cfg *cfg)
+{
+    pid_t id;
+    int p[2];
+    int rc = 0;
+    
+    pipe(p);
+    
+    id = fork();
+    if (id == 0)
+    {
+        // child
+        const char *program = "/sbin/ifconfig";
+        dup2(p[1], 1);
+        close(p[0]);
+        close(p[1]);
+        rc = execlp(program, program, "-v", cfg->name, NULL);
+        exit(rc);
+    }
+    else if (id > 0)
+    {
+        char devbuf[2048];
+        char toss[80];
+        int  len = 0;
+        int  do_toss = 0;
+        int  one_read;
+        close(p[1]);
+        do
+        {
+            one_read = read(p[0], do_toss ? toss : &devbuf[len], 
+                            do_toss ? sizeof(toss) : sizeof(devbuf) - len - 1);
+            if (one_read == -1)
+                break;
+            if (len + one_read >= sizeof(devbuf) - 1)
+                do_toss = 1;
+            else
+                len += one_read;
+        } while (one_read > 0);
+        close(p[0]);
+        waitpid(id, &rc, 0);
+        if (one_read < 0)
+        {
+            fprintf(stderr, "Error reading data for %s: %s\nValidate port name\n",
+                    cfg->name, strerror(errno));
+            return -1;
+        }
+        if (rc != 0)
+        {
+            fprintf(stderr, "Error getting details for port %s; make sure it's "
+                    "active\n", cfg->name);
+            return -1;
+        }
+        devbuf[len] = 0;
+        if (memcmp(devbuf, cfg->name, strlen(cfg->name)))
+        {
+            fprintf(stderr, "Unexpected data from ifconfig of %s: %s\n", 
+                    cfg->name, devbuf);
+            return -1;
+        }
+        if (!(cfg->netmask = eth_field(cfg, devbuf, "Mask:", '\n')))
+            return -1;
+        if (!(cfg->broadcast = eth_field(cfg, devbuf, "Bcast:", ' ')))
+            return -1;
+        if (!(cfg->addr = eth_field(cfg, devbuf, "inet addr:", ' ')))
+            return -1;
+    }
+    else
+    {
+        fprintf(stderr, "Error doing fork getting address information: %s\n",
+                strerror(errno));
+        return -1;
+    }
+    return 0;
+}    
+
 int
 ff_netmap_if_up(void) {
     int i;
+    printf("ff_netmap if up\n");
+    
     for (i = 0; i < ff_global_cfg.netmap.nb_ports; i++) {
-        if (ff_veth_attach(&ff_global_cfg.netmap.port_cfgs[i]) == NULL)
-        {
+        if (get_port_addr(&ff_global_cfg.netmap.port_cfgs[i]) == -1)
             return -1;
-        }
+        if (ff_veth_attach(&ff_global_cfg.netmap.port_cfgs[i]) == NULL)
+            return -1;
     }
+    printf("ff_netmap if up ok\n");
 
     return 0;
 }
@@ -669,6 +789,8 @@ ff_netmap_if_up(void) {
 // EXPORTED AS ff_run!!!
 void
 ff_netmap_run(loop_func_t loop, void *arg) {
+    printf("ff_netmap_run\n");
+    
     main_loop(loop, arg);
     //struct loop_routine *lr = rte_malloc(NULL,
     //    sizeof(struct loop_routine), 0);

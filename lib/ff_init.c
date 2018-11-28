@@ -25,6 +25,7 @@
  */
 
 #include <stdlib.h>
+#include <stdio.h>
 
 #include "ff_api.h"
 #include "ff_config.h"
@@ -48,11 +49,14 @@ ff_init(int argc, char * const argv[])
     ret = ff_netmap_init(dpdk_argc, (char **)&dpdk_argv);
 #else    
     ret = ff_dpdk_init(dpdk_argc, (char **)&dpdk_argv);
-#endif    
+#endif
+    printf("ff_user_init returned %d\n", ret);    
     if (ret < 0)
         exit(1);
 
+    printf("Call ff_freebsd_init\n");
     ret = ff_freebsd_init();
+    printf("Return from ff_freebsd_init, ret: %d\n", ret);
     if (ret < 0)
         exit(1);
 
