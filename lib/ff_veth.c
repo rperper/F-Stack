@@ -64,9 +64,7 @@
 
 struct ff_veth_softc {
     struct ifnet *ifp;
-#ifndef FF_NETMAP    
     uint8_t mac[ETHER_ADDR_LEN];
-#endif    
     char host_ifname[IF_NAMESIZE];
     in_addr_t ip;
     in_addr_t netmask;
@@ -85,8 +83,8 @@ ff_veth_config(struct ff_veth_softc *sc, struct ff_port_cfg *cfg)
     inet_pton(AF_INET, cfg->addr, &sc->ip);
     inet_pton(AF_INET, cfg->netmask, &sc->netmask);
     inet_pton(AF_INET, cfg->broadcast, &sc->broadcast);
-#ifndef FF_NETMAP
     memcpy(sc->mac, cfg->mac, ETHER_ADDR_LEN);
+#ifndef FF_NETMAP
     inet_pton(AF_INET, cfg->gateway, &sc->gateway);
 #endif
     return 0;
@@ -349,10 +347,8 @@ ff_veth_setup_interface(struct ff_veth_softc *sc, struct ff_port_cfg *cfg)
     ifp->if_start = ff_veth_start;
     ifp->if_transmit = ff_veth_transmit;
     ifp->if_qflush = ff_veth_qflush;
-#ifdef FF_NETMAP
-    ether_ifattach(ifp, "");
-#else
     ether_ifattach(ifp, sc->mac);
+#ifndef FF_NETMAP
     if (cfg->hw_features.rx_csum) {
         ifp->if_capabilities |= IFCAP_RXCSUM;
     }

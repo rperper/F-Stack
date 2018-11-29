@@ -132,6 +132,51 @@ enum FilterReturn {
 
 extern void ff_hardclock(void);
 
+#define HEXDIGIT(c)     (int)(((c >= '0') && (c <= '9')) ? (c - '0') : (c - 'A' + 10))
+#define ASCII_IZE(c)    (((c >= ' ') && (c <= '~')) ? c : '.')
+void ASCII_dump(char *comment, char *dat, int length)
+{
+    int i;
+    int end = (length / 16) * 16;
+    unsigned char *data = (unsigned char *)dat;
+    struct timespec ts;
+    struct tm tms;
+    clock_gettime(CLOCK_REALTIME, &ts);
+    localtime_r(&ts.tv_sec, &tms);
+   
+    printf("%02u:%02u:%02u.%06lu %s, length: %d\n", tms.tm_hour, tms.tm_min, 
+           tms.tm_sec, ts.tv_nsec / 1000, comment, length);
+    for (i = 0; i < end; i+=16)
+    {
+        printf("0x%04x:  %02x%02x %02x%02x %02x%02x %02x%02x %02x%02x %02x%02x"
+               " %02x%02x %02x%02x  %c%c%c%c%c%c%c%c%c%c%c%c%c%c%c%c\n",
+               i, data[i], data[i+1], data[i+2], data[i+3], data[i+4], data[i+5],
+               data[i+6], data[i+7], data[i+8], data[i+9], data[i+10], data[i+11],
+               data[i+12], data[i+13], data[i+14], data[i+15], ASCII_IZE(data[i]),
+               ASCII_IZE(data[i+1]), ASCII_IZE(data[i+2]), ASCII_IZE(data[i+3]),
+               ASCII_IZE(data[i+4]), ASCII_IZE(data[i+5]), ASCII_IZE(data[i+6]),
+               ASCII_IZE(data[i+7]), ASCII_IZE(data[i+8]), ASCII_IZE(data[i+9]),
+               ASCII_IZE(data[i+10]), ASCII_IZE(data[i+11]), ASCII_IZE(data[i+12]),
+               ASCII_IZE(data[i+13]), ASCII_IZE(data[i+14]), ASCII_IZE(data[i+15]));
+    }
+    if (end == length)
+        return;
+    for (i = end; i < end + 16; ++i)
+    {
+        if (i == end)
+            printf("0x%04x:  ", i);
+        if (i < length)
+            printf("%02x", data[i]);
+        else
+            printf("  ");
+        if (i % 2) 
+            printf(" ");
+    }
+    printf(" ");
+    for (i = end; i < length; ++i)
+        printf("%c", ASCII_IZE(data[i]));
+    printf("\n");
+}
 /*
 static void
 ff_hardclock_job(void) {
@@ -143,8 +188,6 @@ struct ff_netmap_if_context *
 ff_netmap_register_if(void *sc, void *ifp, struct ff_port_cfg *cfg)
 {
     struct ff_netmap_if_context *ctx = &s_context[cfg->port_id];
-    printf("Registering if\n");
-    printf("   Name: %s\n", cfg->name);
     ctx->sc = sc;
     ctx->ifp = ifp;
     ctx->port_id = cfg->port_id;
@@ -153,23 +196,22 @@ ff_netmap_register_if(void *sc, void *ifp, struct ff_port_cfg *cfg)
     ctx->req.nr_version = NETMAP_API;
     if (ioctl(s_netmapfd, NIOCREGIF, (void *)&ctx->req) == -1)
     {
-        printf("Error initializing netmap port #%d, %s: %s\n", cfg->port_id,
-               cfg->name, strerror(errno));
+        fprintf(stderr, "Error initializing netmap port #%d, %s: %s\n", 
+                cfg->port_id, cfg->name, strerror(errno));
         return NULL;
     }
     ctx->map = ff_mmap(0, ctx->req.nr_memsize, ff_PROT_READ | ff_PROT_WRITE, 
                        ff_MAP_SHARED, s_netmapfd, 0);
     if (!ctx->map)
     {
-        printf("Error creating netmap memory, port #%d, %s: %s\n", cfg->port_id,
-               cfg->name, strerror(errno));
+        fprintf(stderr, "Error creating netmap memory, port #%d, %s: %s\n", 
+                cfg->port_id, cfg->name, strerror(errno));
         return NULL;
     }
     ctx->netmapif = NETMAP_IF(ctx->map, ctx->req.nr_offset);
     ctx->tx_ring = NETMAP_TXRING(ctx->netmapif, 0);
     ctx->rx_ring = NETMAP_RXRING(ctx->netmapif, 0);
     ctx->active = 1;
-    printf("Registering if successful\n");
     
     return ctx;
 }
@@ -179,7 +221,6 @@ ff_netmap_deregister_if(struct ff_netmap_if_context *ctx)
 {
     //free(ctx);
     // Don't see any netmap functions for this!
-    printf("Deregister if\n");
     if (ctx->map)
     {
         ff_munmap(ctx->map, ctx->req.nr_memsize);
@@ -210,15 +251,12 @@ int
 ff_netmap_init(int argc, char **argv)
 {
     struct ff_netmap_if_context *ctx;
-    printf("ff_netmap_init\n");
     if (s_netmapfd == -1)
     {
-        printf("open device\n");
         s_netmapfd = open("/dev/netmap", O_RDWR);
         if (s_netmapfd == -1)
             return -1;
     }
-    printf("allocate context\n");
     ctx = ff_malloc(sizeof(struct ff_netmap_if_context) * 
                     ff_global_cfg.netmap.nb_ports);
     if (ctx == NULL)
@@ -240,7 +278,6 @@ ff_netmap_init(int argc, char **argv)
 
     init_clock();
 
-    printf("ff_netmap_init ok\n");
     return 0;
 }
 
@@ -264,8 +301,7 @@ static char *netmap_read(struct ff_netmap_if_context *ctx, int *len)
     }
     
     struct netmap_slot *slot = &ctx->rx_ring->slot[ctx->rx_ring->head];
-    char *data = NETMAP_BUF(ctx->rx_ring,
-                            slot->buf_idx);
+    char *data = NETMAP_BUF(ctx->rx_ring, slot->buf_idx);
     *len = slot->len;
     return data;
 }
@@ -276,16 +312,20 @@ ff_veth_input(const struct ff_netmap_if_context *ctx, char *data, int len)
 {
     /* For testing purposes, receive and process only one packet at a time.  */
     if (!data)
+    {
+        fprintf(stderr, "ff_veth_input, NULL data\n");
         return;
-    
+    }
+    //ASCII_dump("Input packet", data, len);
     //struct netmap_slot *slot = &ctx->rx_ring->slot[ctx->rx_ring->head];
     void *hdr = ff_mbuf_gethdr(NULL, len, data, len, 0/*rx_csum*/);
 
     ff_veth_process_packet(ctx->ifp, hdr);
     
-    ctx->rx_ring->head = nm_ring_next(ctx->rx_ring, ctx->rx_ring->head);
+    ctx->rx_ring->cur = ctx->rx_ring->head = nm_ring_next(ctx->rx_ring,
+                                                          ctx->rx_ring->head);
     // consume the packet
-    ioctl(s_netmapfd, NIOCTXSYNC, 0);
+    ioctl(s_netmapfd, NIOCRXSYNC, 0);
 }
 
 
@@ -324,7 +364,6 @@ process_packets(uint16_t port_id, const struct ff_netmap_if_context *ctx,
     enum FilterReturn filter = protocol_filter(data, len);
     if (filter == FILTER_ARP) {
         // The original code has it deep copied.  For now just don't dequeue it
-        printf("Process ARP packet\n");
 #ifdef FF_KNI
         if (enable_kni && rte_eal_process_type() == RTE_PROC_PRIMARY) {
             mbuf_pool = pktmbuf_pool[qconf->socket_id];
@@ -343,7 +382,6 @@ process_packets(uint16_t port_id, const struct ff_netmap_if_context *ctx,
         ff_kni_enqueue(port_id, rtem);
 #endif
     } else {
-        printf("Process packet\n");
         ff_veth_input(ctx, data, len);
     }
 }
@@ -533,10 +571,12 @@ ff_netmap_if_send(struct ff_netmap_if_context *ctx, void *m,
     pfd.events = POLLOUT;
     pfd.revents = 0;
         
+    //printf("ff_netmap_if_send\n");
     if (poll(&pfd, 1, 0) == -1)
     {
         int err = errno;
         ff_mbuf_free(m);
+        //printf("ff_netmap_if_send return NOT TIME TO SEND!\n");
         errno = err;
         return -1;
     }
@@ -544,9 +584,11 @@ ff_netmap_if_send(struct ff_netmap_if_context *ctx, void *m,
     if (!(pfd.revents & POLLOUT))
     {
         // Don't free the buffer?
+        //printf("ff_netmap_if_send return NOT TIME TO SEND 2!\n");
         errno = ENOBUFS;
         return -1;
     }
+    //struct mbuf *mb = (struct mbuf *)m;
     
     struct netmap_slot *slot = &ctx->tx_ring->slot[ctx->tx_ring->head];
     ret = ff_mbuf_copydata(m, NETMAP_BUF(ctx->tx_ring, 
@@ -556,10 +598,16 @@ ff_netmap_if_send(struct ff_netmap_if_context *ctx, void *m,
     ff_mbuf_free(m);
     if (ret == -1)
     {
+        fprintf(stderr, "ff_mbuf_copydata FAILED\n");
         return -1;
     }
-    ctx->tx_ring->head = nm_ring_next(ctx->tx_ring, ctx->tx_ring->head);
+    //ASCII_dump("Output packet", NETMAP_BUF(ctx->tx_ring, slot->buf_idx), total);
+   
+    ctx->tx_ring->cur = ctx->tx_ring->head = nm_ring_next(ctx->tx_ring,
+                                                          ctx->tx_ring->head);
     ret = ioctl(s_netmapfd, NIOCTXSYNC, 0);
+    //printf("ff_netmap_if_send return %u\n", ret);
+    
     return ret;
 }
 
@@ -579,8 +627,7 @@ main_loop(loop_func_t loop, void *arg)
     //prev_tsc = 0;
     usch_tsc = 0;
 
-    printf("ff_netmap start main_loop\n");
-
+    //printf("Enter main loop\n");
     while (1) {
         cur_tsc = ff_get_tsc_ns();
         expire_tsc = cur_tsc + EXPIRE_NS;
@@ -759,6 +806,26 @@ get_port_addr(struct ff_port_cfg *cfg)
             return -1;
         if (!(cfg->addr = eth_field(cfg, devbuf, "inet addr:", ' ')))
             return -1;
+        char *mac;
+        if (!(mac = eth_field(cfg, devbuf, "HWaddr ", ' ')))
+            return -1;
+        if (strlen(mac) != 17)
+        {
+            fprintf(stderr, "Mac address discovered not a good address: %s (%ld)\n",
+                    mac, strlen(mac));
+            return -1;
+        }
+        int i = 0;
+        int str_index = 0;
+        for (i = 0; i < 6; ++i)
+        {
+            cfg->mac[i] = HEXDIGIT(mac[str_index]) * 16 + 
+                          HEXDIGIT(mac[str_index + 1]);
+            str_index += 3;
+        }
+        free(mac);
+        //printf("Addr: %s, Bcast: %s, Mask: %s\n", cfg->addr, cfg->broadcast, 
+        //       cfg->netmask);
     }
     else
     {
@@ -772,7 +839,6 @@ get_port_addr(struct ff_port_cfg *cfg)
 int
 ff_netmap_if_up(void) {
     int i;
-    printf("ff_netmap if up\n");
     
     for (i = 0; i < ff_global_cfg.netmap.nb_ports; i++) {
         if (get_port_addr(&ff_global_cfg.netmap.port_cfgs[i]) == -1)
@@ -780,7 +846,6 @@ ff_netmap_if_up(void) {
         if (ff_veth_attach(&ff_global_cfg.netmap.port_cfgs[i]) == NULL)
             return -1;
     }
-    printf("ff_netmap if up ok\n");
 
     return 0;
 }
@@ -789,8 +854,7 @@ ff_netmap_if_up(void) {
 // EXPORTED AS ff_run!!!
 void
 ff_netmap_run(loop_func_t loop, void *arg) {
-    printf("ff_netmap_run\n");
-    
+   
     main_loop(loop, arg);
     //struct loop_routine *lr = rte_malloc(NULL,
     //    sizeof(struct loop_routine), 0);

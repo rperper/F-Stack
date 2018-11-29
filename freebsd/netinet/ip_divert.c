@@ -559,7 +559,7 @@ div_bind(struct socket *so, struct sockaddr *nam, struct thread *td)
 {
 	struct inpcb *inp;
 	int error;
-
+      
 	inp = sotoinpcb(so);
 	KASSERT(inp != NULL, ("div_bind: inp == NULL"));
 	/* in_pcbbind assumes that nam is a sockaddr_in

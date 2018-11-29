@@ -50,12 +50,12 @@ struct ff_hw_features {
 struct ff_port_cfg {
     char *name;
     uint8_t port_id;
-    /* in NETMAP the following 3 are discovered not configured */
+    /* in NETMAP the following 4 are discovered not configured */
     char *addr;         
     char *netmask;
     char *broadcast;
-#ifndef FF_NETMAP
     uint8_t mac[6];
+#ifndef FF_NETMAP
     struct ff_hw_features hw_features;
     char *gateway;
     char *pcap;
