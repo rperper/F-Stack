@@ -64,8 +64,6 @@
 #include "ff_api.h"
 
 
-int s_netmapfd = -1;
-
 // Mellanox Linux's driver key
 static uint8_t default_rsskey_40bytes[40] = {
     0xd1, 0x81, 0xc6, 0x2c, 0xf7, 0xf4, 0xdb, 0x5b,
@@ -91,6 +89,7 @@ struct mbuf_table {
 };
 
 struct ff_netmap_if_context {
+    int                 fd;
     void               *sc;     // veth_softc structure
     void               *ifp;    // In veth_softc structure, the ifnet structure
     uint16_t            port_id;
@@ -188,20 +187,28 @@ struct ff_netmap_if_context *
 ff_netmap_register_if(void *sc, void *ifp, struct ff_port_cfg *cfg)
 {
     struct ff_netmap_if_context *ctx = &s_context[cfg->port_id];
+    
+    ctx->fd = open("/dev/netmap", O_RDWR);
+    if (ctx->fd == -1)
+    {
+        fprintf(stderr, "Error opening /dev/netmap: %s\n", strerror(errno));
+        return NULL;
+    }
+    
     ctx->sc = sc;
     ctx->ifp = ifp;
     ctx->port_id = cfg->port_id;
     //ctx->hw_features = cfg->hw_features;
     strcpy(ctx->req.nr_name, cfg->name);
     ctx->req.nr_version = NETMAP_API;
-    if (ioctl(s_netmapfd, NIOCREGIF, (void *)&ctx->req) == -1)
+    if (ioctl(ctx->fd, NIOCREGIF, (void *)&ctx->req) == -1)
     {
         fprintf(stderr, "Error initializing netmap port #%d, %s: %s\n", 
                 cfg->port_id, cfg->name, strerror(errno));
         return NULL;
     }
     ctx->map = ff_mmap(0, ctx->req.nr_memsize, ff_PROT_READ | ff_PROT_WRITE, 
-                       ff_MAP_SHARED, s_netmapfd, 0);
+                       ff_MAP_SHARED, ctx->fd, 0);
     if (!ctx->map)
     {
         fprintf(stderr, "Error creating netmap memory, port #%d, %s: %s\n", 
@@ -225,6 +232,11 @@ ff_netmap_deregister_if(struct ff_netmap_if_context *ctx)
     {
         ff_munmap(ctx->map, ctx->req.nr_memsize);
         ctx->map = NULL;
+    }
+    if (ctx->fd > 0)
+    {
+        close(ctx->fd);
+        ctx->fd = -1;
     }
     ctx->map = NULL;
     ctx->active = 0;        
@@ -251,18 +263,10 @@ int
 ff_netmap_init(int argc, char **argv)
 {
     struct ff_netmap_if_context *ctx;
-    if (s_netmapfd == -1)
-    {
-        s_netmapfd = open("/dev/netmap", O_RDWR);
-        if (s_netmapfd == -1)
-            return -1;
-    }
     ctx = ff_malloc(sizeof(struct ff_netmap_if_context) * 
                     ff_global_cfg.netmap.nb_ports);
     if (ctx == NULL)
     {
-        close(s_netmapfd);
-        s_netmapfd = -1;
         return -1;
     }
     memset(ctx, 0, sizeof(struct ff_netmap_if_context) * 
@@ -272,6 +276,7 @@ ff_netmap_init(int argc, char **argv)
     int i;
     for (i = 0; i < ff_global_cfg.netmap.nb_ports; ++i)
     {
+        ctx[i].fd = -1;
         ctx[i].cfg = &ff_global_cfg.netmap.port_cfgs[i];
         ctx[i].port_id = i;
     }
@@ -279,31 +284,6 @@ ff_netmap_init(int argc, char **argv)
     init_clock();
 
     return 0;
-}
-
-
-static char *netmap_read(struct ff_netmap_if_context *ctx, int *len)
-{
-    struct pollfd pfd;
-    
-    pfd.fd = s_netmapfd;
-    pfd.events = POLLIN;
-    pfd.revents = 0;
-        
-    if (poll(&pfd, 1, 0) == -1)
-    {
-        return NULL;
-    }
-        
-    if (!(pfd.revents & POLLIN))
-    {
-        return NULL;
-    }
-    
-    struct netmap_slot *slot = &ctx->rx_ring->slot[ctx->rx_ring->head];
-    char *data = NETMAP_BUF(ctx->rx_ring, slot->buf_idx);
-    *len = slot->len;
-    return data;
 }
 
 
@@ -325,7 +305,7 @@ ff_veth_input(const struct ff_netmap_if_context *ctx, char *data, int len)
     ctx->rx_ring->cur = ctx->rx_ring->head = nm_ring_next(ctx->rx_ring,
                                                           ctx->rx_ring->head);
     // consume the packet
-    ioctl(s_netmapfd, NIOCRXSYNC, 0);
+    ioctl(ctx->fd, NIOCRXSYNC, 0);
 }
 
 
@@ -384,6 +364,19 @@ process_packets(uint16_t port_id, const struct ff_netmap_if_context *ctx,
     } else {
         ff_veth_input(ctx, data, len);
     }
+}
+
+
+int netmap_read_process(short event, void *arg)
+{
+    struct ff_netmap_if_context *ctx = (struct ff_netmap_if_context *)arg;
+    if (!(event & POLLIN))
+        return 0;
+    struct netmap_slot *slot = &ctx->rx_ring->slot[ctx->rx_ring->head];
+    char *data = NETMAP_BUF(ctx->rx_ring, slot->buf_idx);
+    int len = slot->len;
+    process_packets(ctx->port_id, ctx, data, len);
+    return 1;
 }
 
 
@@ -567,7 +560,7 @@ ff_netmap_if_send(struct ff_netmap_if_context *ctx, void *m,
     /* Do NOT go through the intermediate rte_mempool.  We'll do our own anyway*/
     int ret;
     struct pollfd pfd;
-    pfd.fd = s_netmapfd;
+    pfd.fd = ctx->fd;
     pfd.events = POLLOUT;
     pfd.revents = 0;
         
@@ -605,12 +598,13 @@ ff_netmap_if_send(struct ff_netmap_if_context *ctx, void *m,
    
     ctx->tx_ring->cur = ctx->tx_ring->head = nm_ring_next(ctx->tx_ring,
                                                           ctx->tx_ring->head);
-    ret = ioctl(s_netmapfd, NIOCTXSYNC, 0);
+    ret = ioctl(ctx->fd, NIOCTXSYNC, 0);
     //printf("ff_netmap_if_send return %u\n", ret);
     
     return ret;
 }
 
+#ifndef FF_NETMAP
 static int
 main_loop(loop_func_t loop, void *arg)
 {
@@ -664,15 +658,28 @@ main_loop(loop_func_t loop, void *arg)
             port_id = s_context[i].port_id;
             ctx = &s_context[port_id];
             int len;
-            char *data = netmap_read(ctx, &len);
-            if (!data)
+            struct pollfd pfd;
+    
+            pfd.fd = ctx->fd;
+            pfd.events = POLLIN;
+            pfd.revents = 0;
+        
+            if (poll(&pfd, 1, 0) == -1)
+            {
                 continue;
-            idle = 0;
+            }
+        
+            if (!(pfd.revents & POLLIN))
+            {
+                continue;
+            }
+    
+            if (netmap_read_process(pfd.revents, ctx) == 1)
+                idle = 0;
             /* Prefetch and handle already prefetched packets */
             //for (j = 0; j < (nb_rx - PREFETCH_OFFSET); j++) {
             //    rte_prefetch0(rte_pktmbuf_mtod(pkts_burst[
             //            j + PREFETCH_OFFSET], void *));
-            process_packets(port_id, ctx, data, len);
             //}
 
         }
@@ -710,7 +717,7 @@ main_loop(loop_func_t loop, void *arg)
 
     return 0;
 }
-
+#endif
 
 static char *
 eth_field(struct ff_port_cfg *cfg, char *devbuf, const char *title, char sep)
@@ -852,6 +859,7 @@ ff_netmap_if_up(void) {
 
 
 // EXPORTED AS ff_run!!!
+/*
 void
 ff_netmap_run(loop_func_t loop, void *arg) {
    
@@ -864,6 +872,8 @@ ff_netmap_run(loop_func_t loop, void *arg) {
     //rte_eal_mp_wait_lcore();
     //rte_free(lr);
 }
+*/
+
 
 void
 ff_netmap_pktmbuf_free(void *m)
@@ -935,4 +945,25 @@ ff_get_tsc_ns()
     clock_gettime(CLOCK_REALTIME, &ts);
     return (ts.tv_sec * 1000000000ull + ts.tv_nsec);
 }
+
+
+// Netmap only functions exported
+int ff_num_events(void)
+{
+    return ff_global_cfg.netmap.nb_ports;
+}
+
+
+int ff_get_event(int index, int *fd, short *mask, event_func_t *evt_fn, 
+                 void **arg)
+{
+    if (!s_context)
+        return -1;
+    *fd = s_context[index].fd;
+    *mask = POLLIN;
+    *evt_fn = netmap_read_process;
+    (*arg) = (void *)&s_context[index];
+    return 0;
+}
+
 

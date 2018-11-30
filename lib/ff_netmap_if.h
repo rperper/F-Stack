@@ -23,14 +23,15 @@
 
 #define ff_IF_NAME "f-stack-%d"
 
+/*
 struct loop_routine {
     loop_func_t loop;
     void *arg;
 };
-
+*/
 int ff_netmap_init(int argc, char **argv);
 int ff_netmap_if_up(void);
-void ff_netmap_run(loop_func_t loop, void *arg);
+//void ff_netmap_run(loop_func_t loop, void *arg);
 
 struct ff_netmap_if_context;
 struct ff_port_cfg;

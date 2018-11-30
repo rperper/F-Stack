@@ -44,11 +44,19 @@ struct linux_sockaddr {
     char sa_data[14];
 };
 
+#ifdef FF_NETMAP
+// Implemented in ff_netmap_if.c and used after ff_init
+int ff_num_events(void);
+typedef int (*event_func_t)(short event, void *arg);
+int ff_get_event(int index, int *fd, short *mask, event_func_t *fn, void **arg);
+#else
 typedef int (*loop_func_t)(void *arg);
 
-int ff_init(int argc, char * const argv[]);
-
 void ff_run(loop_func_t loop, void *arg);
+#endif
+
+
+int ff_init(int argc, char * const argv[]);
 
 /* POSIX-LIKE api begin */
 

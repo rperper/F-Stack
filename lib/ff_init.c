@@ -71,13 +71,14 @@ ff_init(int argc, char * const argv[])
     return 0;
 }
 
+#ifndef FF_NETMAP
 void
 ff_run(loop_func_t loop, void *arg)
 {
 #ifdef FF_NETMAP    
-    ff_netmap_run(loop, arg);
+    //ff_netmap_run(loop, arg);
 #else    
     ff_dpdk_run(loop, arg);
 #endif    
 }
-
+#endif
