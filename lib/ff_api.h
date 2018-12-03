@@ -49,6 +49,9 @@ struct linux_sockaddr {
 int ff_num_events(void);
 typedef int (*event_func_t)(short event, void *arg);
 int ff_get_event(int index, int *fd, short *mask, event_func_t *fn, void **arg);
+typedef int (*test_process_fn_t)(void);
+extern test_process_fn_t ff_tp_fn;
+void ff_set_test_process(test_process_fn_t fn);
 #else
 typedef int (*loop_func_t)(void *arg);
 

@@ -306,6 +306,10 @@ ff_veth_input(const struct ff_netmap_if_context *ctx, char *data, int len)
                                                           ctx->rx_ring->head);
     // consume the packet
     ioctl(ctx->fd, NIOCRXSYNC, 0);
+#ifdef FF_NETMAP
+    if (ff_tp_fn)
+        ff_tp_fn();
+#endif    
 }
 
 
@@ -563,7 +567,12 @@ ff_netmap_if_send(struct ff_netmap_if_context *ctx, void *m,
     pfd.fd = ctx->fd;
     pfd.events = POLLOUT;
     pfd.revents = 0;
-        
+
+#ifdef FF_NETMAP
+    if (ff_tp_fn)
+        ff_tp_fn();
+#endif    
+    
     //printf("ff_netmap_if_send\n");
     if (poll(&pfd, 1, 0) == -1)
     {
@@ -601,6 +610,10 @@ ff_netmap_if_send(struct ff_netmap_if_context *ctx, void *m,
     ret = ioctl(ctx->fd, NIOCTXSYNC, 0);
     //printf("ff_netmap_if_send return %u\n", ret);
     
+#ifdef FF_NETMAP
+    if (ff_tp_fn)
+        ff_tp_fn();
+#endif    
     return ret;
 }
 
@@ -963,7 +976,16 @@ int ff_get_event(int index, int *fd, short *mask, event_func_t *evt_fn,
     *mask = POLLIN;
     *evt_fn = netmap_read_process;
     (*arg) = (void *)&s_context[index];
+#ifdef FF_NETMAP
+    if (ff_tp_fn)
+        ff_tp_fn();
+#endif    
     return 0;
 }
 
 
+test_process_fn_t ff_tp_fn = NULL;
+void ff_set_test_process(test_process_fn_t fn)
+{
+    ff_tp_fn = fn;
+}
