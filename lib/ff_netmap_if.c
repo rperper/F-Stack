@@ -37,7 +37,7 @@
 #include <sys/ioctl.h>
 #include <sys/types.h>
 #include <sys/wait.h>
-
+#include <sys/timerfd.h>
 #include <netinet/in.h>
 
 #include <libio.h>
@@ -110,6 +110,8 @@ static struct ff_netmap_if_context *s_context = NULL;
 
 static struct ff_top_args ff_top_status;
 static struct ff_traffic_args ff_traffic;
+
+int s_netmap_if_timer = -1;
 
 enum FilterReturn {
     FILTER_UNKNOWN = -1,
@@ -254,6 +256,36 @@ check_all_ports_link_status(void)
 static int
 init_clock(void)
 {
+    s_netmap_if_timer = timerfd_create(CLOCK_MONOTONIC, TFD_NONBLOCK);
+    if (s_netmap_if_timer == -1)
+    {
+        fprintf(stderr, "Error creating F-Stack/Netmap timer: %s\n", 
+                strerror(errno));
+        return -1;
+    }
+    /* The original code:
+    rte_timer_subsystem_init();
+    uint64_t hz = rte_get_timer_hz();
+    uint64_t intrs = MS_PER_S/ff_global_cfg.freebsd.hz;
+    uint64_t tsc = (hz + MS_PER_S - 1) / MS_PER_S*intrs;
+
+    rte_timer_init(&freebsd_clock);
+    rte_timer_reset(&freebsd_clock, tsc, PERIODICAL,
+        rte_lcore_id(), &ff_hardclock_job, NULL);
+    Since I have no idea of the original values, I'm simply going to use 10ms. */
+    struct itimerspec timerspec;
+    timerspec.it_interval.tv_sec = 0;
+    timerspec.it_interval.tv_nsec = 10000000l; //10 million
+    timerspec.it_value.tv_sec = timerspec.it_interval.tv_sec;
+    timerspec.it_value.tv_nsec = timerspec.it_interval.tv_nsec;
+    if (timerfd_settime(s_netmap_if_timer, 0 /* relative timer */, 
+                        &timerspec, NULL) == -1)
+    {
+        fprintf(stderr, "Error setting timer for F-Stack/Netmap timer: %s\n",
+                strerror(errno));
+        return -1;
+    }
+    
     ff_update_current_ts();
 
     return 0;
@@ -306,10 +338,6 @@ ff_veth_input(const struct ff_netmap_if_context *ctx, char *data, int len)
                                                           ctx->rx_ring->head);
     // consume the packet
     ioctl(ctx->fd, NIOCRXSYNC, 0);
-#ifdef FF_NETMAP
-    if (ff_tp_fn)
-        ff_tp_fn();
-#endif    
 }
 
 
@@ -565,30 +593,23 @@ ff_netmap_if_send(struct ff_netmap_if_context *ctx, void *m,
     int ret;
     struct pollfd pfd;
     pfd.fd = ctx->fd;
-    pfd.events = POLLOUT;
+    pfd.events = POLLOUT | POLLERR;
     pfd.revents = 0;
 
-#ifdef FF_NETMAP
-    if (ff_tp_fn)
-        ff_tp_fn();
-#endif    
-    
-    //printf("ff_netmap_if_send\n");
+    //s_packet_num++;
+    //printf("ff_netmap_if_send #%d\n", s_packet_num);
     if (poll(&pfd, 1, 0) == -1)
     {
         int err = errno;
         ff_mbuf_free(m);
-        //printf("ff_netmap_if_send return NOT TIME TO SEND!\n");
         errno = err;
-        return -1;
+        return errno;
     }
         
     if (!(pfd.revents & POLLOUT))
     {
-        // Don't free the buffer?
-        //printf("ff_netmap_if_send return NOT TIME TO SEND 2!\n");
-        errno = ENOBUFS;
-        return -1;
+        ff_mbuf_free(m);
+        return EWOULDBLOCK;
     }
     //struct mbuf *mb = (struct mbuf *)m;
     
@@ -598,10 +619,10 @@ ff_netmap_if_send(struct ff_netmap_if_context *ctx, void *m,
                            0, total);
     slot->len = total;
     ff_mbuf_free(m);
-    if (ret == -1)
+    if (ret != 0)
     {
         fprintf(stderr, "ff_mbuf_copydata FAILED\n");
-        return -1;
+        return E2BIG;
     }
     //ASCII_dump("Output packet", NETMAP_BUF(ctx->tx_ring, slot->buf_idx), total);
    
@@ -609,12 +630,7 @@ ff_netmap_if_send(struct ff_netmap_if_context *ctx, void *m,
                                                           ctx->tx_ring->head);
     ret = ioctl(ctx->fd, NIOCTXSYNC, 0);
     //printf("ff_netmap_if_send return %u\n", ret);
-    
-#ifdef FF_NETMAP
-    if (ff_tp_fn)
-        ff_tp_fn();
-#endif    
-    return ret;
+    return (ret == 0) ? 0 : errno;
 }
 
 #ifndef FF_NETMAP
@@ -973,19 +989,29 @@ int ff_get_event(int index, int *fd, short *mask, event_func_t *evt_fn,
     if (!s_context)
         return -1;
     *fd = s_context[index].fd;
-    *mask = POLLIN;
+    *mask = POLLIN;// | POLLOUT | POLLERR;
     *evt_fn = netmap_read_process;
     (*arg) = (void *)&s_context[index];
-#ifdef FF_NETMAP
-    if (ff_tp_fn)
-        ff_tp_fn();
-#endif    
     return 0;
 }
 
 
-test_process_fn_t ff_tp_fn = NULL;
-void ff_set_test_process(test_process_fn_t fn)
+static int fire_timer()
 {
-    ff_tp_fn = fn;
+    uint64_t exp;
+    read(s_netmap_if_timer, &exp, sizeof(exp));
+    ff_hardclock();
+    ff_update_current_ts();
+    return 0;
+}
+
+
+int ff_get_timer_fire(int *fd, short *mask, timer_fire_func_t *fire_fn)
+{
+    if ((!s_context) || (s_netmap_if_timer == -1))
+        return -1;
+    *fd = s_netmap_if_timer;
+    *mask = POLLIN;
+    *fire_fn = fire_timer;
+    return 0;
 }
