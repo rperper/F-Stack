@@ -39,6 +39,8 @@
 #include <sys/wait.h>
 #include <sys/timerfd.h>
 #include <netinet/in.h>
+#include <net/if.h>
+#include <arpa/inet.h>
 
 #include <libio.h>
 
@@ -133,7 +135,6 @@ enum FilterReturn {
 
 extern void ff_hardclock(void);
 
-#define HEXDIGIT(c)     (int)(((c >= '0') && (c <= '9')) ? (c - '0') : (c - 'A' + 10))
 #define ASCII_IZE(c)    (((c >= ' ') && (c <= '~')) ? c : '.')
 void ASCII_dump(char *comment, char *dat, int length)
 {
@@ -329,7 +330,6 @@ ff_veth_input(const struct ff_netmap_if_context *ctx, char *data, int len)
         return;
     }
     //ASCII_dump("Input packet", data, len);
-    //struct netmap_slot *slot = &ctx->rx_ring->slot[ctx->rx_ring->head];
     void *hdr = ff_mbuf_gethdr(NULL, len, data, len, 0/*rx_csum*/);
 
     ff_veth_process_packet(ctx->ifp, hdr);
@@ -583,6 +583,7 @@ process_msg_ring(uint16_t proc_id)
     return 0;
 }
 
+int s_packet_num = 0;
 int
 ff_netmap_if_send(struct ff_netmap_if_context *ctx, void *m,
     int total)
@@ -596,8 +597,7 @@ ff_netmap_if_send(struct ff_netmap_if_context *ctx, void *m,
     pfd.events = POLLOUT | POLLERR;
     pfd.revents = 0;
 
-    //s_packet_num++;
-    //printf("ff_netmap_if_send #%d\n", s_packet_num);
+    s_packet_num++;
     if (poll(&pfd, 1, 0) == -1)
     {
         int err = errno;
@@ -629,7 +629,6 @@ ff_netmap_if_send(struct ff_netmap_if_context *ctx, void *m,
     ctx->tx_ring->cur = ctx->tx_ring->head = nm_ring_next(ctx->tx_ring,
                                                           ctx->tx_ring->head);
     ret = ioctl(ctx->fd, NIOCTXSYNC, 0);
-    //printf("ff_netmap_if_send return %u\n", ret);
     return (ret == 0) ? 0 : errno;
 }
 
@@ -748,140 +747,80 @@ main_loop(loop_func_t loop, void *arg)
 }
 #endif
 
+
 static char *
-eth_field(struct ff_port_cfg *cfg, char *devbuf, const char *title, char sep)
+get_port_addr(int sd, int IOCTL, struct ifreq *ifr, const char *task)
 {
-    char *pos = strstr(devbuf, title);
-    if (!pos)
+    char *str;
+    if (ioctl(sd, IOCTL, ifr) == -1)
     {
-        fprintf(stderr, "Port %s has no %s.  Can't be used\n", cfg->name, 
-                title);
+        fprintf(stderr, "Error getting %s: %s\n", task, strerror(errno));
+        close(sd);
         return NULL;
     }
-    char *ssep = strchr(pos + strlen(title), sep);
-    if (!ssep)
+    str = inet_ntoa(((struct sockaddr_in *)&ifr->ifr_addr)->sin_addr);
+    if (!str)
     {
-        fprintf(stderr, "Port %s has no %s followed by a separator.  "
-                "Can't be used\n", cfg->name, title);
+        fprintf(stderr, "Error in return address of %s\n", task);
+        close(sd);
         return NULL;
     }
-    *ssep = 0;
-    char *dup = strdup(pos + strlen(title));
-    if (!dup)
+    str = strdup(str);
+    if (!str)
     {
-        fprintf(stderr, "During port parsing, insufficient memory\n");
+        fprintf(stderr, "Can't even dup a string during %s\n", task);
+        close(sd);
         return NULL;
     }
-    return dup;
+    return str;
 }
 
-
-static int 
-get_port_addr(struct ff_port_cfg *cfg)
-{
-    pid_t id;
-    int p[2];
-    int rc = 0;
-    
-    pipe(p);
-    
-    id = fork();
-    if (id == 0)
-    {
-        // child
-        const char *program = "/sbin/ifconfig";
-        dup2(p[1], 1);
-        close(p[0]);
-        close(p[1]);
-        rc = execlp(program, program, "-v", cfg->name, NULL);
-        exit(rc);
-    }
-    else if (id > 0)
-    {
-        char devbuf[2048];
-        char toss[80];
-        int  len = 0;
-        int  do_toss = 0;
-        int  one_read;
-        close(p[1]);
-        do
-        {
-            one_read = read(p[0], do_toss ? toss : &devbuf[len], 
-                            do_toss ? sizeof(toss) : sizeof(devbuf) - len - 1);
-            if (one_read == -1)
-                break;
-            if (len + one_read >= sizeof(devbuf) - 1)
-                do_toss = 1;
-            else
-                len += one_read;
-        } while (one_read > 0);
-        close(p[0]);
-        waitpid(id, &rc, 0);
-        if (one_read < 0)
-        {
-            fprintf(stderr, "Error reading data for %s: %s\nValidate port name\n",
-                    cfg->name, strerror(errno));
-            return -1;
-        }
-        if (rc != 0)
-        {
-            fprintf(stderr, "Error getting details for port %s; make sure it's "
-                    "active\n", cfg->name);
-            return -1;
-        }
-        devbuf[len] = 0;
-        if (memcmp(devbuf, cfg->name, strlen(cfg->name)))
-        {
-            fprintf(stderr, "Unexpected data from ifconfig of %s: %s\n", 
-                    cfg->name, devbuf);
-            return -1;
-        }
-        if (!(cfg->netmask = eth_field(cfg, devbuf, "Mask:", '\n')))
-            return -1;
-        if (!(cfg->broadcast = eth_field(cfg, devbuf, "Bcast:", ' ')))
-            return -1;
-        if (!(cfg->addr = eth_field(cfg, devbuf, "inet addr:", ' ')))
-            return -1;
-        char *mac;
-        if (!(mac = eth_field(cfg, devbuf, "HWaddr ", ' ')))
-            return -1;
-        if (strlen(mac) != 17)
-        {
-            fprintf(stderr, "Mac address discovered not a good address: %s (%ld)\n",
-                    mac, strlen(mac));
-            return -1;
-        }
-        int i = 0;
-        int str_index = 0;
-        for (i = 0; i < 6; ++i)
-        {
-            cfg->mac[i] = HEXDIGIT(mac[str_index]) * 16 + 
-                          HEXDIGIT(mac[str_index + 1]);
-            str_index += 3;
-        }
-        free(mac);
-        //printf("Addr: %s, Bcast: %s, Mask: %s\n", cfg->addr, cfg->broadcast, 
-        //       cfg->netmask);
-    }
-    else
-    {
-        fprintf(stderr, "Error doing fork getting address information: %s\n",
-                strerror(errno));
-        return -1;
-    }
-    return 0;
-}    
 
 int
 ff_netmap_if_up(void) {
     int i;
     
-    for (i = 0; i < ff_global_cfg.netmap.nb_ports; i++) {
-        if (get_port_addr(&ff_global_cfg.netmap.port_cfgs[i]) == -1)
-            return -1;
-        if (ff_veth_attach(&ff_global_cfg.netmap.port_cfgs[i]) == NULL)
-            return -1;
+    int sd = socket(PF_INET, SOCK_DGRAM, 0);
+    if (sd < 0)
+    {
+        fprintf(stderr, "Error getting socket to get if info: %s\n", 
+                strerror(errno));
+        return -1;
     }
+    for (i = 0; i < ff_global_cfg.netmap.nb_ports; ++i)
+    {
+        struct ifreq ifr;
+        struct ff_port_cfg *cfg = &ff_global_cfg.netmap.port_cfgs[i];
+            
+        memset(&ifr, 0, sizeof(ifr));
+        strcpy(ifr.ifr_name, cfg->name);
+        if ((!(cfg->addr = get_port_addr(sd, SIOCGIFADDR, &ifr, "addr"))) ||
+            (!(cfg->netmask = get_port_addr(sd, SIOCGIFNETMASK, &ifr, "netmask"))) ||
+            (!(cfg->broadcast = get_port_addr(sd, SIOCGIFBRDADDR, &ifr, "broadcast")))) {
+            return -1;
+        }
+        // Hardware address is returned not as an IP but as 6 bytes of data
+        if (ioctl(sd, SIOCGIFHWADDR, &ifr) == -1)
+        {
+            fprintf(stderr, "Error getting hardware address: %s\n", 
+                    strerror(errno));
+            close(sd);
+            return -1;
+        }
+        memcpy(cfg->mac, &ifr.ifr_hwaddr.sa_data, 6);
+        printf("Port: %s, addr: %s, netmask: %s, broadcast: %s, mac: "
+               "%02x:%02x:%02x:%02x:%02x:%02x\n", cfg->name,
+               cfg->addr, cfg->netmask, cfg->broadcast, 
+               (unsigned char)cfg->mac[0], (unsigned char)cfg->mac[1],
+               (unsigned char)cfg->mac[2], (unsigned char)cfg->mac[3],
+               (unsigned char)cfg->mac[4], (unsigned char)cfg->mac[5]);
+        if (ff_veth_attach(cfg) == NULL)
+        {
+            close(sd);
+            return -1;
+        }
+    }
+    close(sd);
 
     return 0;
 }

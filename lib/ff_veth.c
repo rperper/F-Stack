@@ -405,7 +405,7 @@ ff_veth_attach(struct ff_port_cfg *cfg)
     memset(sc, 0, sizeof(struct ff_veth_softc));
 
     snprintf(sc->host_ifname, sizeof(sc->host_ifname), ff_IF_NAME, cfg->port_id);
-
+    
     error = ff_veth_config(sc, cfg);
     if (0 != error) {
         goto fail;
