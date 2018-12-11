@@ -723,8 +723,10 @@ tcp_input(struct mbuf **mp, int *offp, int proto)
 		}
 
 		if (th->th_sum) {
+                        //printf("!!!BAD checksum - appears to happen regularly\n");
 			TCPSTAT_INC(tcps_rcvbadsum);
-			goto drop;
+			//COMMENT OUT THE LINE BELOW TO WORK ON CENTOS!
+			//goto drop;
 		}
 		/* Re-initialization for later version check */
 		ip->ip_v = IPVERSION;
