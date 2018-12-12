@@ -261,6 +261,7 @@ ff_veth_transmit(struct ifnet *ifp, struct mbuf *m)
 {
     struct ff_veth_softc *sc = (struct ff_veth_softc *)ifp->if_softc;
 #ifdef FF_NETMAP
+    m->m_pkthdr.csum_flags = 0;
     return ff_netmap_if_send(sc->host_ctx, (void*)m, m->m_pkthdr.len);
 #else    
     return ff_dpdk_if_send(sc->host_ctx, (void*)m, m->m_pkthdr.len);

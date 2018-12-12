@@ -79,7 +79,7 @@ __FBSDID("$FreeBSD$");
  * routines to turnaround packets back to the originator, and
  * host table maintenance routines.
  */
-static VNET_DEFINE(int, icmplim) = 200;
+static VNET_DEFINE(int, icmplim) = 2000;
 #define	V_icmplim			VNET(icmplim)
 SYSCTL_INT(_net_inet_icmp, ICMPCTL_ICMPLIM, icmplim, CTLFLAG_VNET | CTLFLAG_RW,
 	&VNET_NAME(icmplim), 0,

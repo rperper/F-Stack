@@ -57,6 +57,11 @@ typedef int (*loop_func_t)(void *arg);
 void ff_run(loop_func_t loop, void *arg);
 #endif
 
+#define FF_WANTDEBUG
+#ifdef FF_WANTDEBUG
+typedef void (*debug_fn_t)(const char *fmt, ...);
+void ff_setdebug(debug_fn_t dbg_fn);
+#endif
 
 int ff_init(int argc, char * const argv[]);
 

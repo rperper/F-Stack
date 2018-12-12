@@ -135,6 +135,14 @@ enum FilterReturn {
 
 extern void ff_hardclock(void);
 
+#ifdef FF_WANTDEBUG
+debug_fn_t ff_debug = NULL;
+void ff_setdebug(debug_fn_t dbg_fn)
+{
+    ff_debug = dbg_fn;
+}
+#endif
+
 #define ASCII_IZE(c)    (((c >= ' ') && (c <= '~')) ? c : '.')
 void ASCII_dump(char *comment, char *dat, int length)
 {
@@ -276,7 +284,7 @@ init_clock(void)
     Since I have no idea of the original values, I'm simply going to use 10ms. */
     struct itimerspec timerspec;
     timerspec.it_interval.tv_sec = 0;
-    timerspec.it_interval.tv_nsec = 10000000l; //10 million
+    timerspec.it_interval.tv_nsec = 1000000l; //1 million
     timerspec.it_value.tv_sec = timerspec.it_interval.tv_sec;
     timerspec.it_value.tv_nsec = timerspec.it_interval.tv_nsec;
     if (timerfd_settime(s_netmap_if_timer, 0 /* relative timer */, 
@@ -329,6 +337,10 @@ ff_veth_input(const struct ff_netmap_if_context *ctx, char *data, int len)
         fprintf(stderr, "ff_veth_input, NULL data\n");
         return;
     }
+#ifdef FF_WANTDEBUG    
+    if (ff_debug)
+        ff_debug("Input packet %d bytes\n", len);
+#endif    
     //ASCII_dump("Input packet", data, len);
     void *hdr = ff_mbuf_gethdr(NULL, len, data, len, 0/*rx_csum*/);
 
@@ -624,6 +636,10 @@ ff_netmap_if_send(struct ff_netmap_if_context *ctx, void *m,
         fprintf(stderr, "ff_mbuf_copydata FAILED\n");
         return E2BIG;
     }
+#ifdef FF_WANTDEBUG    
+    if (ff_debug)
+        ff_debug("Output packet %d bytes\n", total);
+#endif    
     //ASCII_dump("Output packet", NETMAP_BUF(ctx->tx_ring, slot->buf_idx), total);
    
     ctx->tx_ring->cur = ctx->tx_ring->head = nm_ring_next(ctx->tx_ring,
@@ -939,6 +955,10 @@ static int fire_timer()
 {
     uint64_t exp;
     read(s_netmap_if_timer, &exp, sizeof(exp));
+#ifdef FF_WANTDEBUG    
+    if (ff_debug)
+        ff_debug("Fire timer, read %ld\n", exp);
+#endif
     ff_hardclock();
     ff_update_current_ts();
     return 0;
@@ -952,5 +972,9 @@ int ff_get_timer_fire(int *fd, short *mask, timer_fire_func_t *fire_fn)
     *fd = s_netmap_if_timer;
     *mask = POLLIN;
     *fire_fn = fire_timer;
+#ifdef FF_WANTDEBUG    
+    if (ff_debug)
+        ff_debug("Setting timer with fd: %d\n", *fd);
+#endif    
     return 0;
 }
